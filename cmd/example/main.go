@@ -11,7 +11,7 @@ import (
 	"github.com/telesma-app/ctap/cose"
 	"github.com/telesma-app/ctap/credential"
 	"github.com/telesma-app/winhello"
-	"github.com/telesma-app/winhello/hiddenwindow"
+	"github.com/telesma-app/winhello/pkg/hiddenwindow"
 )
 
 func main() {

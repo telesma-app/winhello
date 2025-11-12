@@ -53,7 +53,7 @@ jobs:
       if: runner.os == 'Windows'
       env:
         CGO_ENABLED: '1'
-      run: go test -race -count=10 -timeout=2m ./hiddenwindow
+      run: go test -race -count=10 -timeout=2m ./pkg/hiddenwindow
 
     - name: Build Windows ARM64
       if: runner.os == 'Linux'

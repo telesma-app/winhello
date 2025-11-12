@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Package
+        xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+        xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+        xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+        xmlns:com4="http://schemas.microsoft.com/appx/manifest/com/windows10/4"
+        xmlns:com5="http://schemas.microsoft.com/appx/manifest/com/windows10/5"
+        xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
+        xmlns:desktop6="http://schemas.microsoft.com/appx/manifest/desktop/windows10/6"
+        IgnorableNamespaces="uap rescap com4 com5 uap10 desktop6">
+
+    <Identity
+            Name="GoPassManager"
+            Publisher="CN=GoPass"
+            Version="1.0.0.0"
+            ProcessorArchitecture="x64"/>
+
+    <Properties>
+        <DisplayName>GoPass Manager</DisplayName>
+        <PublisherDisplayName>GoPass</PublisherDisplayName>
+        <Logo>Assets\Logo.png</Logo>
+        <uap10:AllowExternalContent>true</uap10:AllowExternalContent>
+        <desktop6:RegistryWriteVirtualization>disabled</desktop6:RegistryWriteVirtualization>
+        <desktop6:FileSystemWriteVirtualization>disabled</desktop6:FileSystemWriteVirtualization>
+    </Properties>
+
+    <Dependencies>
+        <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.26100.2894" MaxVersionTested="10.0.26200.7019"/>
+    </Dependencies>
+
+    <Resources>
+        <Resource Language="en-us"/>
+    </Resources>
+
+    <Applications>
+        <Application Id="GoPassManager" Executable="test.exe" uap10:TrustLevel="mediumIL"
+                     uap10:RuntimeBehavior="win32App">
+            <uap:VisualElements
+                    AppListEntry="none"
+                    DisplayName="Go WebAuthn Plugin Test"
+                    Description="WebAuthn Plugin Test Application"
+                    BackgroundColor="transparent"
+                    Square150x150Logo="Assets\Square150x150Logo.png"
+                    Square44x44Logo="Assets\Square44x44Logo.png">
+            </uap:VisualElements>
+            <Extensions>
+                <com4:Extension Category="windows.comServer">
+                    <com4:ComServer>
+                        <com4:ExeServer Executable="pkg\pluginauthenticator\plugin.exe">
+                            <com4:Class
+                                    ProgId="GoPass.Manager.1"
+                                    VersionIndependentProgId="GoPass.Manager"
+                                    Id="1537ff70-8f94-495b-bad1-bcff96311d5f"
+                                    DisplayName="GoPass Manager"/>
+                        </com4:ExeServer>
+                        <com4:ProgId Id="GoPass.Manager" CurrentVersion="GoPass.Manager.1"/>
+                        <com4:ProgId Id="GoPass.Manager.1" Clsid="1537ff70-8f94-495b-bad1-bcff96311d5f"/>
+                    </com4:ComServer>
+                </com4:Extension>
+            </Extensions>
+        </Application>
+    </Applications>
+
+    <Capabilities>
+        <rescap:Capability Name="runFullTrust"/>
+        <rescap:Capability Name="unvirtualizedResources"/>
+    </Capabilities>
+</Package>

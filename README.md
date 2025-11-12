@@ -62,7 +62,7 @@ func main() {
 
 ## Examples
 
-Run `go run ./example` on Windows. [`example/main.go`](example/main.go) creates a
+Run `go run ./cmd/example` on Windows. [`cmd/example/main.go`](cmd/example/main.go) creates a
 Windows Hello passkey for `example.org`, then uses it with `GetAssertion`.
 Both steps require user interaction. The example deletes its demo passkey when it finishes.
 It uses placeholder client data for a local API demonstration; a real application
@@ -103,6 +103,8 @@ Windows account:
 $env:WINHELLO_TESTS = '1'
 go test -v .
 ```
+
+Plugin integration tests require a Windows account with the test plugin installed and enabled. Set `WINHELLO_PLUGIN_TESTS=1` to run them.
 
 To cross-compile from macOS or Linux:
 
