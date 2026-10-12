@@ -1,6 +1,6 @@
 module github.com/go-ctap/winhello
 
-go 1.25.8
+go 1.26.0
 
 require (
 	github.com/fxamacker/cbor/v2 v2.9.2
@@ -8,7 +8,7 @@ require (
 	github.com/goforj/godump v1.9.1
 	github.com/ldclabs/cose v1.4.0
 	github.com/stretchr/testify v1.11.1
-	golang.org/x/sys v0.47.0
+	golang.org/x/sys v0.49.0
 )
 
 require (
