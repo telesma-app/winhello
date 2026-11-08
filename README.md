@@ -83,7 +83,6 @@ existing credential in your application.
 Run tests and static checks in PowerShell on Windows:
 
 ```powershell
-$env:GOWORK = "off"
 go test ./...
 go vet ./...
 ```
@@ -91,7 +90,7 @@ go vet ./...
 To check compilation from macOS or Linux:
 
 ```sh
-GOWORK=off GOOS=windows go build ./...
+GOOS=windows go build ./...
 ```
 
 ## License
