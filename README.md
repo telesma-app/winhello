@@ -1,6 +1,6 @@
 # telesma-app/winhello
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/go-ctap/winhello.svg)](https://pkg.go.dev/github.com/go-ctap/winhello)
+[![Go Reference](https://pkg.go.dev/badge/github.com/telesma-app/winhello.svg)](https://pkg.go.dev/github.com/telesma-app/winhello)
 [![Go](https://github.com/telesma-app/winhello/actions/workflows/go.yml/badge.svg)](https://github.com/telesma-app/winhello/actions/workflows/go.yml)
 
 `telesma-app/winhello` provides cgo-free Go bindings to the Windows WebAuthn API
@@ -26,10 +26,13 @@ and the selected authenticator.
 ## Installation
 
 ```sh
-go get github.com/go-ctap/winhello@latest
+go get github.com/telesma-app/winhello@latest
 ```
 
-The module path remains `github.com/go-ctap/winhello`; use that path for imports.
+The repository and Go module moved from `github.com/go-ctap/winhello` to
+`github.com/telesma-app/winhello`. To update an existing project, replace the old
+prefix in imports (including subpackages), run the command above, then `go mod tidy`.
+
 See [`go.mod`](go.mod) for the required Go version.
 
 ## Quick start
@@ -43,7 +46,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/go-ctap/winhello"
+	"github.com/telesma-app/winhello"
 )
 
 func main() {

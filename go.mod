@@ -1,4 +1,4 @@
-module github.com/go-ctap/winhello
+module github.com/telesma-app/winhello
 
 go 1.27.3
 
