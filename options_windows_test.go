@@ -61,19 +61,24 @@ func TestNativeBooleanExtensionInputs(t *testing.T) {
 				GetCredentialBlobInputs: &webauthn.GetCredentialBlobInputs{GetCredBlob: tt.enabled},
 			}, nil)
 			require.NoError(t, err)
+
 			create := makeCredentialOptions(nil, &webauthn.CreateAuthenticationExtensionsClientInputs{
 				CreateHMACSecretInputs:   &webauthn.CreateHMACSecretInputs{HMACCreateSecret: tt.enabled},
 				CreateMinPinLengthInputs: &webauthn.CreateMinPinLengthInputs{MinPinLength: tt.enabled},
 			}, nil)
 
 			assert.Zero(t, create.BEnablePrf)
+
 			if !tt.enabled {
 				assert.Zero(t, get.Extensions.CExtensions)
 				assert.Zero(t, create.Extensions.CExtensions)
+
 				return
 			}
+
 			assert.Equal(t, uint32(1), get.Extensions.CExtensions)
 			assert.Equal(t, uint32(2), create.Extensions.CExtensions)
+
 			for _, exts := range []_WEBAUTHN_EXTENSIONS{get.Extensions, create.Extensions} {
 				for _, ext := range unsafe.Slice(exts.PExtensions, exts.CExtensions) {
 					assert.Equal(t, uint32(4), ext.CbExtension)
@@ -120,6 +125,7 @@ func TestMakeCredentialPRFOptions(t *testing.T) {
 
 			assert.Equal(t, int32(1), opts.BEnablePrf)
 			assert.Equal(t, tt.wantFlags, opts.DwFlags)
+
 			if tt.wantEval {
 				require.NotNil(t, opts.PPRFGlobalEval)
 				assert.Equal(t, first, unsafe.Slice(opts.PPRFGlobalEval.PbFirst, opts.PPRFGlobalEval.CbFirst))

@@ -21,6 +21,7 @@ func main() {
 	defer wnd.Close()
 
 	credIDStr := "ruDDeY_rT2Jv25HOJCY5LhTUXlX1DrIaAYVTXrumUtU5qNvr9uo77UekHDMiu1TEIRgw20ptOx841RsVZl--iofFQXkc0vIZ0-gpXZtw5g138QI0a1d4WBQbF7F1PbpC"
+
 	credID, err := base64.RawURLEncoding.DecodeString(credIDStr)
 	if err != nil {
 		panic(err)

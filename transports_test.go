@@ -32,6 +32,7 @@ func TestTransportFlags(t *testing.T) {
 			if got := flagsToTransports(tt.flags); !slices.Equal(got, tt.transports) {
 				t.Errorf("flagsToTransports(%#x) = %v, want %v", tt.flags, got, tt.transports)
 			}
+
 			if got := transportsToFlags(tt.transports); got != tt.flags {
 				t.Errorf("transportsToFlags(%v) = %#x, want %#x", tt.transports, got, tt.flags)
 			}

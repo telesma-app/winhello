@@ -159,6 +159,7 @@ func (a *_WEBAUTHN_ASSERTION) ToGetAssertionResponse(extInputs *webauthn.GetAuth
 	error,
 ) {
 	authDataRaw := bytes.Clone(unsafe.Slice(a.PbAuthenticatorData, a.CbAuthenticatorData))
+
 	authData, err := protocol.ParseGetAssertionAuthData(authDataRaw)
 	if err != nil {
 		return nil, err
@@ -175,7 +176,7 @@ func (a *_WEBAUTHN_ASSERTION) ToGetAssertionResponse(extInputs *webauthn.GetAuth
 	}
 
 	userID := bytes.Clone(unsafe.Slice(a.PbUserId, a.CbUserId))
-	if userID != nil && len(userID) > 0 {
+	if len(userID) > 0 {
 		resp.User = &credential.PublicKeyCredentialUserEntity{
 			ID: userID,
 		}
@@ -203,7 +204,7 @@ func (a *_WEBAUTHN_ASSERTION) ToGetAssertionResponse(extInputs *webauthn.GetAuth
 
 	if a.DwVersion >= 5 {
 		unsignedExtensionOutputsRaw := bytes.Clone(unsafe.Slice(a.PbUnsignedExtensionOutputs, a.CbUnsignedExtensionOutputs))
-		if unsignedExtensionOutputsRaw != nil && len(unsignedExtensionOutputsRaw) > 0 {
+		if len(unsignedExtensionOutputsRaw) > 0 {
 			if err := cbor.Unmarshal(unsignedExtensionOutputsRaw, &resp.UnsignedExtensionOutputs); err != nil {
 				return nil, err
 			}
@@ -212,16 +213,35 @@ func (a *_WEBAUTHN_ASSERTION) ToGetAssertionResponse(extInputs *webauthn.GetAuth
 
 	if a.DwVersion >= 6 {
 		clientDataJSONRaw := bytes.Clone(unsafe.Slice(a.PbClientDataJSON, a.CbClientDataJSON))
-		if clientDataJSONRaw != nil && len(clientDataJSONRaw) > 0 {
+		if len(clientDataJSONRaw) > 0 {
 			winHelloResp.ClientDataJSON = clientDataJSONRaw
 		}
+
 		authenticationResponseJSONRaw := bytes.Clone(unsafe.Slice(a.PbAuthenticationResponseJSON, a.CbAuthenticationResponseJSON))
-		if authenticationResponseJSONRaw != nil && len(authenticationResponseJSONRaw) > 0 {
+		if len(authenticationResponseJSONRaw) > 0 {
 			winHelloResp.AuthenticationResponseJSON = authenticationResponseJSONRaw
 		}
 	}
 
 	winHelloResp.ExtensionOutputs = new(webauthn.GetAuthenticationExtensionsClientOutputs)
+
+	if extInputs != nil && extInputs.LargeBlobInputs != nil {
+		blob := extInputs.LargeBlob
+
+		success := a.DwVersion >= 2 && winHelloResp.CredLargeBlobStatus == WinHelloCredentialLargeBlobStatusSuccess
+		if blob.Read != nil && *blob.Read {
+			winHelloResp.ExtensionOutputs.LargeBlobOutputs = &webauthn.LargeBlobOutputs{}
+			if success {
+				// Keep a successful empty read distinct from a missing blob.
+				winHelloResp.ExtensionOutputs.LargeBlob.Blob = append([]byte{}, winHelloResp.CredLargeBlob...)
+			}
+		} else if blob.Write != nil {
+			winHelloResp.ExtensionOutputs.LargeBlobOutputs = &webauthn.LargeBlobOutputs{
+				LargeBlob: webauthn.AuthenticationExtensionsLargeBlobOutputs{Written: new(success)},
+			}
+		}
+	}
+
 	if extInputs != nil && winHelloResp.hmacSecret != nil {
 		if extInputs.GetHMACSecretInputs != nil {
 			winHelloResp.ExtensionOutputs.GetHMACSecretOutputs = &webauthn.GetHMACSecretOutputs{
@@ -243,11 +263,13 @@ func (a *_WEBAUTHN_ASSERTION) ToGetAssertionResponse(extInputs *webauthn.GetAuth
 			}
 		}
 	}
+
 	if winHelloResp.AuthData.Extensions != nil && winHelloResp.AuthData.Extensions.CredBlob != nil {
 		winHelloResp.ExtensionOutputs.GetCredentialBlobOutputs = &webauthn.GetCredentialBlobOutputs{
 			GetCredBlob: winHelloResp.AuthData.Extensions.CredBlob,
 		}
 	}
+
 	if a.DwVersion >= 2 {
 		for _, ext := range unsafe.Slice(a.Extensions.PExtensions, a.Extensions.CExtensions) {
 			switch windows.UTF16PtrToString(ext.PwszExtensionIdentifier) {
@@ -298,6 +320,7 @@ type WinHelloMakeCredentialResponse struct {
 
 func (a *_WEBAUTHN_CREDENTIAL_ATTESTATION) ToMakeCredentialResponse(extInputs *webauthn.CreateAuthenticationExtensionsClientInputs) (*WinHelloMakeCredentialResponse, error) {
 	authDataRaw := bytes.Clone(unsafe.Slice(a.PbAuthenticatorData, a.CbAuthenticatorData))
+
 	authData, err := protocol.ParseMakeCredentialAuthData(authDataRaw)
 	if err != nil {
 		return nil, err
@@ -311,7 +334,6 @@ func (a *_WEBAUTHN_CREDENTIAL_ATTESTATION) ToMakeCredentialResponse(extInputs *w
 
 	attestationRaw := bytes.Clone(unsafe.Slice(a.PbAttestation, a.CbAttestation))
 	if resp.Format != attestation.AttestationStatementFormatIdentifierNone &&
-		attestationRaw != nil &&
 		len(attestationRaw) > 0 {
 		if err := cbor.Unmarshal(attestationRaw, &resp.AttestationStatement); err != nil {
 			return nil, err
@@ -339,7 +361,7 @@ func (a *_WEBAUTHN_CREDENTIAL_ATTESTATION) ToMakeCredentialResponse(extInputs *w
 
 	if a.DwVersion >= 6 {
 		unsignedExtensionOutputsRaw := bytes.Clone(unsafe.Slice(a.PbUnsignedExtensionOutputs, a.CbUnsignedExtensionOutputs))
-		if unsignedExtensionOutputsRaw != nil && len(unsignedExtensionOutputsRaw) > 0 {
+		if len(unsignedExtensionOutputsRaw) > 0 {
 			if err := cbor.Unmarshal(unsignedExtensionOutputsRaw, &resp.UnsignedExtensionOutputs); err != nil {
 				return nil, err
 			}
@@ -353,29 +375,38 @@ func (a *_WEBAUTHN_CREDENTIAL_ATTESTATION) ToMakeCredentialResponse(extInputs *w
 				Second: bytes.Clone(unsafe.Slice(a.PHmacSecret.PbSecond, a.PHmacSecret.CbSecond)),
 			}
 		}
+
 		winHelloResp.ThirdPartyPayment = int32ToBool(a.BThirdPartyPayment)
 	}
 
 	if a.DwVersion >= 8 {
 		winHelloResp.Transports = flagsToTransports(a.DwTransports)
+
 		clientDataJSONRaw := bytes.Clone(unsafe.Slice(a.PbClientDataJSON, a.CbClientDataJSON))
-		if clientDataJSONRaw != nil && len(clientDataJSONRaw) > 0 {
+		if len(clientDataJSONRaw) > 0 {
 			winHelloResp.ClientDataJSON = clientDataJSONRaw
 		}
+
 		registrationResponseJSONRaw := bytes.Clone(unsafe.Slice(a.PbRegistrationResponseJSON, a.CbRegistrationResponseJSON))
-		if registrationResponseJSONRaw != nil && len(registrationResponseJSONRaw) > 0 {
+		if len(registrationResponseJSONRaw) > 0 {
 			winHelloResp.RegistrationResponseJSON = registrationResponseJSONRaw
 		}
 	}
 
 	winHelloResp.ExtensionOutputs = new(webauthn.CreateAuthenticationExtensionsClientOutputs)
-
-	if extInputs != nil && extInputs.CreateCredentialPropertiesInputs != nil && extInputs.CreateCredentialPropertiesInputs.CredentialProperties {
-		winHelloResp.ExtensionOutputs.CreateCredentialPropertiesOutputs = &webauthn.CreateCredentialPropertiesOutputs{}
-		if a.DwVersion >= 4 {
-			winHelloResp.ExtensionOutputs.CreateCredentialPropertiesOutputs.CredentialProperties.ResidentKey = new(winHelloResp.ResidentKey)
+	if extInputs != nil && extInputs.LargeBlobInputs != nil {
+		winHelloResp.ExtensionOutputs.LargeBlobOutputs = &webauthn.LargeBlobOutputs{
+			LargeBlob: webauthn.AuthenticationExtensionsLargeBlobOutputs{Supported: new(winHelloResp.LargeBlobSupported)},
 		}
 	}
+
+	if extInputs != nil && extInputs.CreateCredentialPropertiesInputs != nil && extInputs.CredentialProperties {
+		winHelloResp.ExtensionOutputs.CreateCredentialPropertiesOutputs = &webauthn.CreateCredentialPropertiesOutputs{}
+		if a.DwVersion >= 4 {
+			winHelloResp.ExtensionOutputs.CredentialProperties.ResidentKey = new(winHelloResp.ResidentKey)
+		}
+	}
+
 	if extInputs != nil && extInputs.PRFInputs != nil {
 		prf := &webauthn.CreatePRFOutputs{
 			PRF: webauthn.CreateAuthenticationExtensionsPRFOutputs{Enabled: winHelloResp.PRFEnabled},
@@ -383,8 +414,10 @@ func (a *_WEBAUTHN_CREDENTIAL_ATTESTATION) ToMakeCredentialResponse(extInputs *w
 		if winHelloResp.HMACSecret != nil {
 			prf.PRF.Results = *winHelloResp.HMACSecret
 		}
+
 		winHelloResp.ExtensionOutputs.CreatePRFOutputs = prf
 	}
+
 	if extInputs != nil && extInputs.CreateHMACSecretMCInputs != nil && winHelloResp.HMACSecret != nil {
 		winHelloResp.ExtensionOutputs.CreateHMACSecretMCOutputs = &webauthn.CreateHMACSecretMCOutputs{
 			HMACGetSecret: webauthn.HMACGetSecretOutput{
@@ -407,6 +440,7 @@ func (a *_WEBAUTHN_CREDENTIAL_ATTESTATION) ToMakeCredentialResponse(extInputs *w
 			}
 		}
 	}
+
 	if a.DwVersion >= 2 {
 		for _, ext := range unsafe.Slice(a.Extensions.PExtensions, a.Extensions.CExtensions) {
 			switch windows.UTF16PtrToString(ext.PwszExtensionIdentifier) {

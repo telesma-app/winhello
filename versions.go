@@ -82,6 +82,7 @@ func availableVersions(ver uint32) *currentVersion {
 		if i+1 == int(ver) {
 			break
 		}
+
 		d(baseline)
 	}
 

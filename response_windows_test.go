@@ -46,7 +46,7 @@ func TestAssertionResponseOwnsNativeBuffers(t *testing.T) {
 	require.NotNil(t, resp.hmacSecret)
 	assert.Equal(t, bytes.Repeat([]byte{5}, 32), resp.hmacSecret.First)
 	require.NotNil(t, resp.ExtensionOutputs.GetPRFOutputs)
-	assert.Equal(t, bytes.Repeat([]byte{5}, 32), resp.ExtensionOutputs.GetPRFOutputs.PRF.Results.First)
+	assert.Equal(t, bytes.Repeat([]byte{5}, 32), resp.ExtensionOutputs.PRF.Results.First)
 	assert.Equal(t, []byte("{}"), resp.ClientDataJSON)
 	assert.Equal(t, []byte("{\"id\":1}"), resp.AuthenticationResponseJSON)
 	assert.Len(t, resp.UsedTransport, 2)
@@ -101,8 +101,9 @@ func TestCredentialPropertiesResidentKeyPresence(t *testing.T) {
 				assert.Nil(t, resp.ExtensionOutputs.CreateCredentialPropertiesOutputs)
 				return
 			}
+
 			require.NotNil(t, resp.ExtensionOutputs.CreateCredentialPropertiesOutputs)
-			assert.Equal(t, tt.want, resp.ExtensionOutputs.CreateCredentialPropertiesOutputs.CredentialProperties.ResidentKey)
+			assert.Equal(t, tt.want, resp.ExtensionOutputs.CredentialProperties.ResidentKey)
 		})
 	}
 }
@@ -131,9 +132,9 @@ func TestNativeMakeCredentialExtensionOutputs(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NotNil(t, resp.ExtensionOutputs.CreateHMACSecretOutputs)
-	assert.True(t, resp.ExtensionOutputs.CreateHMACSecretOutputs.HMACCreateSecret)
+	assert.True(t, resp.ExtensionOutputs.HMACCreateSecret)
 	require.NotNil(t, resp.ExtensionOutputs.CreateCredentialBlobOutputs)
-	assert.False(t, resp.ExtensionOutputs.CreateCredentialBlobOutputs.CredBlob)
+	assert.False(t, resp.ExtensionOutputs.CredBlob)
 }
 
 func TestNativeGetCredentialBlobOwnsBuffer(t *testing.T) {
@@ -156,5 +157,5 @@ func TestNativeGetCredentialBlobOwnsBuffer(t *testing.T) {
 	clear(data)
 
 	require.NotNil(t, resp.ExtensionOutputs.GetCredentialBlobOutputs)
-	assert.Equal(t, []byte{1, 2, 3}, resp.ExtensionOutputs.GetCredentialBlobOutputs.GetCredBlob)
+	assert.Equal(t, []byte{1, 2, 3}, resp.ExtensionOutputs.GetCredBlob)
 }

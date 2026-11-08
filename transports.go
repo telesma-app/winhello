@@ -17,6 +17,7 @@ const (
 
 func transportsToFlags(transports []credential.AuthenticatorTransport) uint32 {
 	var flags WinHelloCTAPTransport
+
 	for _, transport := range transports {
 		switch transport {
 		case credential.AuthenticatorTransportUSB:
@@ -33,11 +34,13 @@ func transportsToFlags(transports []credential.AuthenticatorTransport) uint32 {
 			flags |= WinHelloCTAPTransportSmartCard
 		}
 	}
+
 	return uint32(flags)
 }
 
 func flagsToTransports(flags uint32) []credential.AuthenticatorTransport {
 	var transports []credential.AuthenticatorTransport
+
 	for _, transport := range []struct {
 		flag WinHelloCTAPTransport
 		name credential.AuthenticatorTransport
@@ -53,5 +56,6 @@ func flagsToTransports(flags uint32) []credential.AuthenticatorTransport {
 			transports = append(transports, transport.name)
 		}
 	}
+
 	return transports
 }

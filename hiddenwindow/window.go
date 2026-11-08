@@ -218,6 +218,7 @@ func registerClassEx(wcx *_WNDCLASSEXW) (uint16, error) {
 	if ret == 0 {
 		return 0, err
 	}
+
 	return uint16(ret), nil
 }
 
@@ -234,7 +235,7 @@ func unregisterClassW(lpClassName *uint16, hInstance windows.Handle) error {
 }
 
 func sendMessage(hWnd windows.HWND, msg uint32, wParam, lParam uintptr) {
-	procSendMessage.Call(
+	_, _, _ = procSendMessage.Call(
 		uintptr(hWnd),
 		uintptr(msg),
 		wParam,
@@ -248,6 +249,7 @@ func translateMessage(msg *_MSG) {
 
 func getCursorPos() (*_POINT, error) {
 	pt := new(_POINT)
+
 	ret, _, err := procGetCursorPos.Call(
 		uintptr(unsafe.Pointer(pt)),
 	)
@@ -287,6 +289,7 @@ type _MONITORINFO struct {
 func getMonitorInfoW(hMonitor windows.Handle) (*_MONITORINFO, error) {
 	monitorInfo := new(_MONITORINFO)
 	monitorInfo.cbSize = uint32(unsafe.Sizeof(*monitorInfo))
+
 	ret, _, err := procGetMonitorInfo.Call(
 		uintptr(hMonitor),
 		uintptr(unsafe.Pointer(monitorInfo)),
@@ -330,11 +333,13 @@ func New(logger *slog.Logger, name string) (*HiddenWindow, error) {
 
 	go func() {
 		runtime.LockOSThread()
+
 		defer runtime.UnlockOSThread()
 		defer close(done)
 
 		classNameStr := fmt.Sprintf("GoHiddenWindowClass-%d-%d", windows.GetCurrentProcessId(), windowClassSequence.Add(1))
 		className, _ := windows.UTF16PtrFromString(classNameStr)
+
 		windowName, err := windows.UTF16PtrFromString(name)
 		if err != nil {
 			initResultChan <- initResult{err: err}
@@ -356,11 +361,17 @@ func New(logger *slog.Logger, name string) (*HiddenWindow, error) {
 					logger.Info("Window class unregistered", "className", classNameStr, "atom", atom)
 				}
 			}
+
 			if hIconSm != 0 {
-				procDestroyIcon.Call(uintptr(hIconSm))
+				if ret, _, err := procDestroyIcon.Call(uintptr(hIconSm)); ret == 0 {
+					logger.Error("DestroyIcon failed", "err", err)
+				}
 			}
+
 			if hIcon != 0 {
-				procDestroyIcon.Call(uintptr(hIcon))
+				if ret, _, err := procDestroyIcon.Call(uintptr(hIcon)); ret == 0 {
+					logger.Error("DestroyIcon failed", "err", err)
+				}
 			}
 		}()
 
@@ -381,6 +392,7 @@ func New(logger *slog.Logger, name string) (*HiddenWindow, error) {
 			case _WM_DESTROY:
 				postQuitMessage(0)
 				logger.Info("Received WM_DESTROY and issued PostQuitMessage")
+
 				return 0
 			default:
 				return defWindowProc(hWnd, msg, wparam, lparam)
@@ -429,6 +441,7 @@ func New(logger *slog.Logger, name string) (*HiddenWindow, error) {
 			initResultChan <- initResult{err: err}
 			return
 		}
+
 		logger.Info("Window class registered", "className", classNameStr, "atom", atom)
 
 		pt, err := getCursorPos()
@@ -467,9 +480,11 @@ func New(logger *slog.Logger, name string) (*HiddenWindow, error) {
 			initResultChan <- initResult{err: err}
 			return
 		}
+
 		logger.Info("Hidden window created successfully", "hwnd", hWnd)
 
 		initResultChan <- initResult{hWnd: hWnd}
+
 		close(initResultChan)
 
 		// SendMessage can safely be called from another thread
@@ -511,6 +526,7 @@ func New(logger *slog.Logger, name string) (*HiddenWindow, error) {
 		<-done
 		return nil, res.err
 	}
+
 	return &HiddenWindow{
 		hWnd:            res.hWnd,
 		closeSignalChan: closeSignalExternalChan,

@@ -381,21 +381,26 @@ func TestWindowsABILayout(t *testing.T) {
 			if tt.typ.Size() != tt.size || uintptr(tt.typ.Align()) != tt.align {
 				t.Errorf("size/alignment = %d/%d, want %d/%d", tt.typ.Size(), tt.typ.Align(), tt.size, tt.align)
 			}
+
 			count := 0
+
 			for i := 0; i < tt.typ.NumField(); i++ {
 				if !strings.HasPrefix(tt.typ.Field(i).Name, "Pad_cgo_") {
 					count++
 				}
 			}
+
 			if count != len(tt.fields) {
 				t.Errorf("field count = %d, want %d", count, len(tt.fields))
 			}
+
 			for name, want := range tt.fields {
 				field, ok := tt.typ.FieldByName(name)
 				if !ok {
 					t.Errorf("missing field %s", name)
 					continue
 				}
+
 				if field.Offset != want.offset || field.Type.Size() != want.size {
 					t.Errorf("%s offset/size = %d/%d, want %d/%d", name, field.Offset, field.Type.Size(), want.offset, want.size)
 				}

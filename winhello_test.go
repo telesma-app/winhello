@@ -38,6 +38,7 @@ func TestMain(m *testing.M) {
 		defer wnd.Close()
 
 		hWnd = wnd.WindowHandle()
+
 		m.Run()
 	}
 }
@@ -80,7 +81,7 @@ func TestAuthenticatorMakePlatformCredential(t *testing.T) {
 	require.NoError(t, err)
 
 	// credProps
-	assert.Equal(t, new(true), credAttestation.ExtensionOutputs.CreateCredentialPropertiesOutputs.CredentialProperties.ResidentKey)
+	assert.Equal(t, new(true), credAttestation.ExtensionOutputs.CredentialProperties.ResidentKey)
 
 	godump.Dump(credAttestation)
 }
@@ -189,7 +190,7 @@ func TestAuthenticatorMakeCrossPlatformCredential(t *testing.T) {
 	require.NoError(t, err)
 
 	// credProps
-	assert.Equal(t, new(false), credAttestation.ExtensionOutputs.CreateCredentialPropertiesOutputs.CredentialProperties.ResidentKey)
+	assert.Equal(t, new(false), credAttestation.ExtensionOutputs.CredentialProperties.ResidentKey)
 
 	godump.Dump(credAttestation)
 }
@@ -248,7 +249,7 @@ func TestAuthenticatorGetCrossPlatformAssertion(t *testing.T) {
 			0x92, 0xc, 0xe0, 0xcc, 0xcd, 0xa5, 0x6b, 0x9e,
 			0x12, 0xfc, 0x6d, 0xab, 0xaf, 0x6, 0x10, 0x5c,
 		},
-		assertion.ExtensionOutputs.GetPRFOutputs.PRF.Results.First,
+		assertion.ExtensionOutputs.PRF.Results.First,
 	)
 
 	godump.Dump(assertion)

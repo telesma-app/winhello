@@ -10,6 +10,7 @@ import (
 
 func TestWebAuthnQueries(t *testing.T) {
 	assert.GreaterOrEqual(t, APIVersionNumber(), uint32(1))
+
 	_, err := IsUserVerifyingPlatformAuthenticatorAvailable()
 	require.NoError(t, err)
 	assert.Equal(t, "Success", ErrorName(windows.S_OK))
