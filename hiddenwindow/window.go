@@ -324,7 +324,39 @@ type initResult struct {
 	err  error
 }
 
-var windowClassSequence atomic.Uint64
+var (
+	windowClassSequence atomic.Uint64
+	// NewCallback registrations cannot be freed, so every window shares one.
+	wndProcCallback = syscall.NewCallback(windowProc)
+	// Each window owns a locked OS thread. Register its logger before creation
+	// so synchronous creation callbacks can also use it, and remove it on exit.
+	windowLoggers sync.Map // map[uint32]*slog.Logger, keyed by OS thread ID
+)
+
+func windowProc(hWnd windows.HWND, msg uint32, wparam, lparam uintptr) uintptr {
+	value, ok := windowLoggers.Load(windows.GetCurrentThreadId())
+	if !ok {
+		return defWindowProc(hWnd, msg, wparam, lparam)
+	}
+
+	logger := value.(*slog.Logger)
+
+	switch msg {
+	case _WM_CLOSE:
+		if err := destroyWindow(hWnd); err != nil {
+			logger.Error("DestroyWindow failed", "err", err)
+		} else {
+			logger.Info("Received WM_CLOSE and issued DestroyWindow")
+		}
+	case _WM_DESTROY:
+		postQuitMessage(0)
+		logger.Info("Received WM_DESTROY and issued PostQuitMessage")
+	default:
+		return defWindowProc(hWnd, msg, wparam, lparam)
+	}
+
+	return 0
+}
 
 func New(logger *slog.Logger, name string) (*HiddenWindow, error) {
 	initResultChan := make(chan initResult)
@@ -336,6 +368,11 @@ func New(logger *slog.Logger, name string) (*HiddenWindow, error) {
 
 		defer runtime.UnlockOSThread()
 		defer close(done)
+
+		threadID := windows.GetCurrentThreadId()
+		windowLoggers.Store(threadID, logger)
+
+		defer windowLoggers.Delete(threadID)
 
 		classNameStr := fmt.Sprintf("GoHiddenWindowClass-%d-%d", windows.GetCurrentProcessId(), windowClassSequence.Add(1))
 		className, _ := windows.UTF16PtrFromString(classNameStr)
@@ -381,26 +418,6 @@ func New(logger *slog.Logger, name string) (*HiddenWindow, error) {
 			return
 		}
 
-		wndProc := syscall.NewCallback(func(hWnd windows.HWND, msg uint32, wparam, lparam uintptr) uintptr {
-			switch msg {
-			case _WM_CLOSE:
-				if err := destroyWindow(hWnd); err != nil {
-					logger.Error("DestroyWindow failed", "err", err)
-				} else {
-					logger.Info("Received WM_CLOSE and issued DestroyWindow")
-				}
-			case _WM_DESTROY:
-				postQuitMessage(0)
-				logger.Info("Received WM_DESTROY and issued PostQuitMessage")
-
-				return 0
-			default:
-				return defWindowProc(hWnd, msg, wparam, lparam)
-			}
-
-			return 0
-		})
-
 		hIcon, err = createIconFromResourceEx(
 			bigIcon,
 			true,
@@ -428,7 +445,7 @@ func New(logger *slog.Logger, name string) (*HiddenWindow, error) {
 		}
 
 		class := _WNDCLASSEXW{
-			lpfnWndProc:   wndProc,
+			lpfnWndProc:   wndProcCallback,
 			hInstance:     hInstance,
 			lpszClassName: className,
 			hIcon:         hIcon,
