@@ -19,31 +19,9 @@ for Windows Hello biometrics and external security keys.
 
 ## Platform support
 
-64-bit Windows 10 or later (`amd64` and `arm64`), with Go 1.27.3 or later.
+64-bit Windows 10 or later (`amd64` and `arm64`).
 Individual API methods and extensions depend on the Windows WebAuthn API version
 and the selected authenticator.
-
-The native declarations follow Microsoft's [`webauthn.h` API 9](https://github.com/microsoft/webauthn/blob/0ef86c2fe31e5b0608cc4fce4820935bd644cabb/webauthn.h).
-`APIVersionNumber()` reports the API available on the running Windows version.
-
-| Feature | Minimum WebAuthn API |
-| --- | --- |
-| Credential creation, assertions, cancellation, `hmac-secret` creation | 1 |
-| `credProtect` | 2 |
-| `credBlob`, `minPinLength`, known `credProps.rk` | 3 |
-| Platform credential listing/deletion, PRF/HMAC assertion inputs | 4 |
-| Large blob support through the native operation options | 5 |
-| PRF enablement during registration | 6 |
-| Registration-time PRF/HMAC evaluation, credential hints | 8 |
-| Authenticator listing, remote origin and response JSON fields | 9 |
-
-For older APIs, an unavailable `credProps.rk` is returned as nil. Listing and
-deletion methods return a DLL lookup error when their native API is unavailable.
-Use `U2FAppIDUsed` on an assertion response to determine whether Windows used the
-requested U2F AppID instead of the relying party ID.
-
-This package wraps the WebAuthn client APIs. Microsoft's passkey-provider plugin
-interfaces are a separate API family.
 
 ## Installation
 
@@ -53,10 +31,6 @@ go get github.com/go-ctap/winhello@latest
 
 The module path remains `github.com/go-ctap/winhello`; use that path for imports.
 See [`go.mod`](go.mod) for the required Go version.
-
-Credential and extension types come from [`github.com/telesma-app/ctap`](https://github.com/telesma-app/ctap):
-`credential` contains credential entities and transports, `webauthn` contains client
-extension inputs and outputs, and `protocol` contains parsed authenticator data.
 
 ## Quick start
 
@@ -117,33 +91,20 @@ go vet ./...
 go mod tidy -diff
 ```
 
-The default test run includes tests for native response conversion, PRF inputs
-and hidden window creation and cleanup. ABI tests compare all native structure
-sizes, alignments and field offsets with the official Windows AMD64/ARM64 layout.
-Interactive Windows Hello and security key tests are opt-in:
+Interactive tests create and delete credentials. Use a test authenticator or
+Windows account:
 
 ```powershell
 $env:WINHELLO_TESTS = '1'
 go test -v .
 ```
 
-These interactive tests use `example.org`, include credential creation and
-deletion, and some require the credential ID recorded in the test source.
-Run them with a test authenticator or Windows account.
-
-On macOS or Linux, run the platform-independent tests and cross-compile Windows:
+To cross-compile from macOS or Linux:
 
 ```sh
-go test ./...
 GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build ./...
 GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go build ./...
 ```
-
-If a parent `go.work` does not include this module, add it to the workspace or set
-`GOWORK=off` for these commands to check the standalone module.
-
-CI runs tests and `go vet` on Windows and Linux, checks formatting and module
-consistency, and cross-compiles Windows ARM64.
 
 ## License
 
