@@ -145,18 +145,6 @@ If a parent `go.work` does not include this module, add it to the workspace or s
 CI runs tests and `go vet` on Windows and Linux, checks formatting and module
 consistency, and cross-compiles Windows ARM64.
 
-## Migrating from the ctaphid-based API
-
-- Replace `github.com/go-ctap/ctaphid/pkg/webauthntypes` imports with the appropriate
-  `github.com/telesma-app/ctap/credential`, `webauthn`, `extension` or `attestation`
-  package. Replace `pkg/ctaptypes` with `protocol` and COSE algorithms with `cose`.
-- `CancelCurrentOperation(id *windows.GUID) error` takes the ID returned by
-  `CancellationID()`. Pass the same ID in the operation's `CancellationID` option.
-- `W3CExceptionDOMError(hr windows.Handle) windows.Handle` maps an HRESULT directly.
-- `PRF.Eval` is a value; leave its zero value to enable PRF without evaluation.
-  Assertion results use `GetPRFOutputs`; registration results use `CreatePRFOutputs`.
-- `CredentialProperties.ResidentKey` is now `*bool` in CTAP client extension outputs.
-
 ## License
 
 [Apache License 2.0](LICENSE).
