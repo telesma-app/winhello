@@ -43,3 +43,9 @@ func TestAvailableVersions(t *testing.T) {
 		})
 	}
 }
+
+func TestUnavailableAPIVersions(t *testing.T) {
+	if got := *availableVersions(0); got != (currentVersion{}) {
+		t.Errorf("unavailable API must not advertise structure versions: %+v", got)
+	}
+}

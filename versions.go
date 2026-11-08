@@ -18,6 +18,10 @@ type currentVersion struct {
 }
 
 func availableVersions(ver uint32) *currentVersion {
+	if ver == 0 {
+		return &currentVersion{}
+	}
+
 	baseline := &currentVersion{
 		rpEntityInformation:     1,
 		userEntityInformation:   1,
