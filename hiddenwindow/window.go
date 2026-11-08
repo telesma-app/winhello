@@ -4,10 +4,11 @@ package hiddenwindow
 
 import (
 	_ "embed"
-	"errors"
 	"fmt"
 	"log/slog"
 	"runtime"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"unsafe"
 
@@ -26,11 +27,9 @@ const (
 )
 
 var (
-	kernel32 = syscall.NewLazyDLL("kernel32.dll")
+	kernel32 = windows.NewLazySystemDLL("kernel32.dll")
 
 	procGetModuleHandleW = kernel32.NewProc("GetModuleHandleW")
-	procGlobalAlloc      = kernel32.NewProc("GlobalAlloc")
-	procGlobalFree       = kernel32.NewProc("GlobalFree")
 	procGetConsoleWindow = kernel32.NewProc("GetConsoleWindow")
 )
 
@@ -43,21 +42,12 @@ func getModuleHandle() (windows.Handle, error) {
 	return windows.Handle(ret), nil
 }
 
-func globalAlloc(uFlags uint32, dwBytes uintptr) windows.Handle {
-	ret, _, _ := procGlobalAlloc.Call(uintptr(uFlags), dwBytes)
-	return windows.Handle(ret)
-}
-
-func globalFree(hMem windows.Handle) windows.Handle {
-	ret, _, _ := procGlobalFree.Call(uintptr(hMem))
-	return windows.Handle(ret)
-}
-
 var (
-	user32 = syscall.NewLazyDLL("user32.dll")
+	user32 = windows.NewLazySystemDLL("user32.dll")
 
 	procGetSystemMetrics         = user32.NewProc("GetSystemMetrics")
 	procCreateIconFromResourceEx = user32.NewProc("CreateIconFromResourceEx")
+	procDestroyIcon              = user32.NewProc("DestroyIcon")
 	procCreateWindowExW          = user32.NewProc("CreateWindowExW")
 	procDefWindowProcW           = user32.NewProc("DefWindowProcW")
 	procDestroyWindow            = user32.NewProc("DestroyWindow")
@@ -228,6 +218,7 @@ func registerClassEx(wcx *_WNDCLASSEXW) (uint16, error) {
 	if ret == 0 {
 		return 0, err
 	}
+
 	return uint16(ret), nil
 }
 
@@ -243,18 +234,13 @@ func unregisterClassW(lpClassName *uint16, hInstance windows.Handle) error {
 	return nil
 }
 
-func sendMessage(hWnd windows.HWND, msg uint32, wParam, lParam uintptr) error {
-	_, _, err := procSendMessage.Call(
+func sendMessage(hWnd windows.HWND, msg uint32, wParam, lParam uintptr) {
+	_, _, _ = procSendMessage.Call(
 		uintptr(hWnd),
 		uintptr(msg),
 		wParam,
 		lParam,
 	)
-	if !errors.Is(err, windows.NOERROR) {
-		return err
-	}
-
-	return nil
 }
 
 func translateMessage(msg *_MSG) {
@@ -263,6 +249,7 @@ func translateMessage(msg *_MSG) {
 
 func getCursorPos() (*_POINT, error) {
 	pt := new(_POINT)
+
 	ret, _, err := procGetCursorPos.Call(
 		uintptr(unsafe.Pointer(pt)),
 	)
@@ -274,8 +261,9 @@ func getCursorPos() (*_POINT, error) {
 }
 
 func monitorFromPoint(pt *_POINT, dwFlags uint32) (windows.Handle, error) {
+	// POINT is passed by value as a single 64-bit argument on amd64 and arm64.
 	ret, _, err := procMonitorFromPoint.Call(
-		uintptr(unsafe.Pointer(pt)),
+		uintptr(uint64(uint32(pt.x))|uint64(uint32(pt.y))<<32),
 		uintptr(dwFlags),
 	)
 	if ret == 0 {
@@ -301,6 +289,7 @@ type _MONITORINFO struct {
 func getMonitorInfoW(hMonitor windows.Handle) (*_MONITORINFO, error) {
 	monitorInfo := new(_MONITORINFO)
 	monitorInfo.cbSize = uint32(unsafe.Sizeof(*monitorInfo))
+
 	ret, _, err := procGetMonitorInfo.Call(
 		uintptr(hMonitor),
 		uintptr(unsafe.Pointer(monitorInfo)),
@@ -314,21 +303,20 @@ func getMonitorInfoW(hMonitor windows.Handle) (*_MONITORINFO, error) {
 
 type HiddenWindow struct {
 	hWnd            windows.HWND
+	closeOnce       sync.Once
 	closeSignalChan chan struct{}
+	done            chan struct{}
 }
 
 func (hw *HiddenWindow) WindowHandle() windows.HWND {
 	return hw.hWnd
 }
 
+// Close waits for the window and its resources to be released.
+// It can be called repeatedly or concurrently.
 func (hw *HiddenWindow) Close() {
-	if hw.closeSignalChan != nil {
-		select {
-		case hw.closeSignalChan <- struct{}{}:
-			<-hw.closeSignalChan
-		default:
-		}
-	}
+	hw.closeOnce.Do(func() { close(hw.closeSignalChan) })
+	<-hw.done
 }
 
 type initResult struct {
@@ -336,16 +324,22 @@ type initResult struct {
 	err  error
 }
 
+var windowClassSequence atomic.Uint64
+
 func New(logger *slog.Logger, name string) (*HiddenWindow, error) {
 	initResultChan := make(chan initResult)
 	closeSignalExternalChan := make(chan struct{})
+	done := make(chan struct{})
 
 	go func() {
 		runtime.LockOSThread()
-		defer runtime.UnlockOSThread()
 
-		classNameStr := fmt.Sprintf("GoHiddenWindowClass-%d", windows.GetCurrentProcessId())
+		defer runtime.UnlockOSThread()
+		defer close(done)
+
+		classNameStr := fmt.Sprintf("GoHiddenWindowClass-%d-%d", windows.GetCurrentProcessId(), windowClassSequence.Add(1))
 		className, _ := windows.UTF16PtrFromString(classNameStr)
+
 		windowName, err := windows.UTF16PtrFromString(name)
 		if err != nil {
 			initResultChan <- initResult{err: err}
@@ -355,6 +349,8 @@ func New(logger *slog.Logger, name string) (*HiddenWindow, error) {
 		var (
 			hInstance windows.Handle
 			atom      uint16
+			hIcon     windows.Handle
+			hIconSm   windows.Handle
 		)
 
 		defer func() {
@@ -365,7 +361,18 @@ func New(logger *slog.Logger, name string) (*HiddenWindow, error) {
 					logger.Info("Window class unregistered", "className", classNameStr, "atom", atom)
 				}
 			}
-			close(closeSignalExternalChan)
+
+			if hIconSm != 0 {
+				if ret, _, err := procDestroyIcon.Call(uintptr(hIconSm)); ret == 0 {
+					logger.Error("DestroyIcon failed", "err", err)
+				}
+			}
+
+			if hIcon != 0 {
+				if ret, _, err := procDestroyIcon.Call(uintptr(hIcon)); ret == 0 {
+					logger.Error("DestroyIcon failed", "err", err)
+				}
+			}
 		}()
 
 		hInstance, err = getModuleHandle()
@@ -385,6 +392,7 @@ func New(logger *slog.Logger, name string) (*HiddenWindow, error) {
 			case _WM_DESTROY:
 				postQuitMessage(0)
 				logger.Info("Received WM_DESTROY and issued PostQuitMessage")
+
 				return 0
 			default:
 				return defWindowProc(hWnd, msg, wparam, lparam)
@@ -393,7 +401,7 @@ func New(logger *slog.Logger, name string) (*HiddenWindow, error) {
 			return 0
 		})
 
-		hIcon, err := createIconFromResourceEx(
+		hIcon, err = createIconFromResourceEx(
 			bigIcon,
 			true,
 			0x00030000,
@@ -406,7 +414,7 @@ func New(logger *slog.Logger, name string) (*HiddenWindow, error) {
 			return
 		}
 
-		hIconSm, err := createIconFromResourceEx(
+		hIconSm, err = createIconFromResourceEx(
 			smallIcon,
 			true,
 			0x00030000,
@@ -433,6 +441,7 @@ func New(logger *slog.Logger, name string) (*HiddenWindow, error) {
 			initResultChan <- initResult{err: err}
 			return
 		}
+
 		logger.Info("Window class registered", "className", classNameStr, "atom", atom)
 
 		pt, err := getCursorPos()
@@ -458,8 +467,8 @@ func New(logger *slog.Logger, name string) (*HiddenWindow, error) {
 			className,
 			windowName,
 			_WS_POPUP|_WS_VISIBLE,
-			monInfo.rcWork.right/2,
-			monInfo.rcWork.bottom/2,
+			monInfo.rcWork.left+(monInfo.rcWork.right-monInfo.rcWork.left)/2,
+			monInfo.rcWork.top+(monInfo.rcWork.bottom-monInfo.rcWork.top)/2,
 			0,
 			0,
 			0,
@@ -471,31 +480,29 @@ func New(logger *slog.Logger, name string) (*HiddenWindow, error) {
 			initResultChan <- initResult{err: err}
 			return
 		}
+
 		logger.Info("Hidden window created successfully", "hwnd", hWnd)
 
 		initResultChan <- initResult{hWnd: hWnd}
+
 		close(initResultChan)
 
 		// SendMessage can safely be called from another thread
-		internalCloseDone := make(chan struct{})
 		go func() {
 			select {
 			case <-closeSignalExternalChan:
 				logger.Info("Received external close signal, sending WM_CLOSE to window", "hwnd", hWnd)
-				if err := sendMessage(hWnd, _WM_CLOSE, 0, 0); err != nil {
-					logger.Error("SendMessage with WM_CLOSE failed", "hwnd", hWnd, "err", err)
-				}
-			case <-internalCloseDone:
+				sendMessage(hWnd, _WM_CLOSE, 0, 0)
+			case <-done:
 				logger.Debug("Message loop ended, close signal listener goroutine exiting")
 				return
 			}
 		}()
 
-		msg := (*_MSG)(unsafe.Pointer(globalAlloc(0, unsafe.Sizeof(_MSG{}))))
-		defer globalFree(windows.Handle(unsafe.Pointer(msg)))
+		var msg _MSG
 
 		for {
-			gotMessage, err := getMessage(msg, 0, 0, 0)
+			gotMessage, err := getMessage(&msg, 0, 0, 0)
 			if err != nil {
 				logger.Error("GetMessage failed", "err", err)
 				return
@@ -503,24 +510,28 @@ func New(logger *slog.Logger, name string) (*HiddenWindow, error) {
 
 			if gotMessage {
 				logger.Info("Got message", "wnd_msg", msg)
-				translateMessage(msg)
+				translateMessage(&msg)
 				logger.Info("Message translated", "wnd_msg", msg)
-				dispatchMessage(msg)
+				dispatchMessage(&msg)
 				logger.Info("Message dispatched", "wnd_msg", msg)
 			} else {
 				logger.Info("Got no message, exiting the loop")
 				break
 			}
 		}
-
-		close(internalCloseDone)
 	}()
 
 	res := <-initResultChan
+	if res.err != nil {
+		<-done
+		return nil, res.err
+	}
+
 	return &HiddenWindow{
 		hWnd:            res.hWnd,
 		closeSignalChan: closeSignalExternalChan,
-	}, res.err
+		done:            done,
+	}, nil
 }
 
 func GetConsoleWindow() windows.HWND {

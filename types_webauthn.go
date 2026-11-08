@@ -3,10 +3,8 @@
 package winhello
 
 /*
-//#cgo CFLAGS: -I${SRCDIR}
-
 #include <windows.h>
-#include <webauthn.h>
+#include "webauthn.h"
 */
 import "C"
 

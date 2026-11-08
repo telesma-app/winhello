@@ -8,14 +8,14 @@ import (
 	"os"
 	"testing"
 
-	"github.com/go-ctap/ctaphid/pkg/webauthntypes"
+	"github.com/go-ctap/winhello/hiddenwindow"
 	"github.com/goforj/godump"
-	"github.com/ldclabs/cose/iana"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/telesma-app/ctap/cose"
+	"github.com/telesma-app/ctap/credential"
+	"github.com/telesma-app/ctap/webauthn"
 	"golang.org/x/sys/windows"
-
-	"github.com/go-ctap/winhello/hiddenwindow"
 )
 
 var (
@@ -38,6 +38,7 @@ func TestMain(m *testing.M) {
 		defer wnd.Close()
 
 		hWnd = wnd.WindowHandle()
+
 		m.Run()
 	}
 }
@@ -50,24 +51,24 @@ func TestAuthenticatorMakePlatformCredential(t *testing.T) {
 	credAttestation, err := MakeCredential(
 		hWnd,
 		[]byte("{}"),
-		webauthntypes.PublicKeyCredentialRpEntity{
+		credential.PublicKeyCredentialRpEntity{
 			ID:   "example.org",
 			Name: "Example RP",
 		},
-		webauthntypes.PublicKeyCredentialUserEntity{
+		credential.PublicKeyCredentialUserEntity{
 			ID:          []byte("john"),
 			Name:        "John Doe",
 			DisplayName: "John Doe",
 		},
-		[]webauthntypes.PublicKeyCredentialParameters{
+		[]credential.PublicKeyCredentialParameters{
 			{
-				Type:      webauthntypes.PublicKeyCredentialTypePublicKey,
-				Algorithm: iana.AlgorithmES256,
+				Type:      credential.PublicKeyCredentialTypePublicKey,
+				Algorithm: cose.AlgorithmES256,
 			},
 		},
 		nil,
-		&webauthntypes.CreateAuthenticationExtensionsClientInputs{
-			CreateCredentialPropertiesInputs: &webauthntypes.CreateCredentialPropertiesInputs{
+		&webauthn.CreateAuthenticationExtensionsClientInputs{
+			CreateCredentialPropertiesInputs: &webauthn.CreateCredentialPropertiesInputs{
 				CredentialProperties: true,
 			},
 		},
@@ -80,7 +81,7 @@ func TestAuthenticatorMakePlatformCredential(t *testing.T) {
 	require.NoError(t, err)
 
 	// credProps
-	assert.True(t, credAttestation.ExtensionOutputs.CreateCredentialPropertiesOutputs.CredentialProperties.ResidentKey)
+	assert.Equal(t, new(true), credAttestation.ExtensionOutputs.CredentialProperties.ResidentKey)
 
 	godump.Dump(credAttestation)
 }
@@ -99,10 +100,10 @@ func TestGetPlatformAssertion(t *testing.T) {
 		&AuthenticatorGetAssertionOptions{
 			AuthenticatorAttachment:     WinHelloAuthenticatorAttachmentPlatform,
 			UserVerificationRequirement: WinHelloUserVerificationRequirementDiscouraged,
-			CredentialHints: []webauthntypes.PublicKeyCredentialHint{
-				webauthntypes.PublicKeyCredentialHintClientDevice,
-				webauthntypes.PublicKeyCredentialHintSecurityKey,
-				webauthntypes.PublicKeyCredentialHintHybrid,
+			CredentialHints: []credential.PublicKeyCredentialHint{
+				credential.PublicKeyCredentialHintClientDevice,
+				credential.PublicKeyCredentialHintSecurityKey,
+				credential.PublicKeyCredentialHintHybrid,
 			},
 		},
 	)
@@ -160,24 +161,24 @@ func TestAuthenticatorMakeCrossPlatformCredential(t *testing.T) {
 	credAttestation, err := MakeCredential(
 		hWnd,
 		[]byte("{}"),
-		webauthntypes.PublicKeyCredentialRpEntity{
+		credential.PublicKeyCredentialRpEntity{
 			ID:   "example.org",
 			Name: "Example RP",
 		},
-		webauthntypes.PublicKeyCredentialUserEntity{
+		credential.PublicKeyCredentialUserEntity{
 			ID:          []byte("john"),
 			Name:        "John Doe",
 			DisplayName: "John Doe",
 		},
-		[]webauthntypes.PublicKeyCredentialParameters{
+		[]credential.PublicKeyCredentialParameters{
 			{
-				Type:      webauthntypes.PublicKeyCredentialTypePublicKey,
-				Algorithm: iana.AlgorithmES256,
+				Type:      credential.PublicKeyCredentialTypePublicKey,
+				Algorithm: cose.AlgorithmES256,
 			},
 		},
 		nil,
-		&webauthntypes.CreateAuthenticationExtensionsClientInputs{
-			CreateCredentialPropertiesInputs: &webauthntypes.CreateCredentialPropertiesInputs{
+		&webauthn.CreateAuthenticationExtensionsClientInputs{
+			CreateCredentialPropertiesInputs: &webauthn.CreateCredentialPropertiesInputs{
 				CredentialProperties: true,
 			},
 		},
@@ -189,7 +190,7 @@ func TestAuthenticatorMakeCrossPlatformCredential(t *testing.T) {
 	require.NoError(t, err)
 
 	// credProps
-	assert.False(t, credAttestation.ExtensionOutputs.CreateCredentialPropertiesOutputs.CredentialProperties.ResidentKey)
+	assert.Equal(t, new(false), credAttestation.ExtensionOutputs.CredentialProperties.ResidentKey)
 
 	godump.Dump(credAttestation)
 }
@@ -202,22 +203,23 @@ func TestAuthenticatorGetCrossPlatformAssertion(t *testing.T) {
 	}
 
 	credIDStr := "ruDDeY_rT2Jv25HOJCY5LhTUXlX1DrIaAYVTXrumUtU5qNvr9uo77UekHDMiu1TEIRgw20ptOx841RsVZl--iofFQXkc0vIZ0-gpXZtw5g138QI0a1d4WBQbF7F1PbpC"
-	credID, _ := base64.URLEncoding.DecodeString(credIDStr)
+	credID, err := base64.RawURLEncoding.DecodeString(credIDStr)
+	require.NoError(t, err)
 
 	assertion, err := GetAssertion(
 		hWnd,
 		"example.org",
 		[]byte("{}"),
-		[]webauthntypes.PublicKeyCredentialDescriptor{
+		[]credential.PublicKeyCredentialDescriptor{
 			{
 				ID:   credID,
-				Type: webauthntypes.PublicKeyCredentialTypePublicKey,
+				Type: credential.PublicKeyCredentialTypePublicKey,
 			},
 		},
-		&webauthntypes.GetAuthenticationExtensionsClientInputs{
-			PRFInputs: &webauthntypes.PRFInputs{
-				PRF: webauthntypes.AuthenticationExtensionsPRFInputs{
-					EvalByCredential: map[string]webauthntypes.AuthenticationExtensionsPRFValues{
+		&webauthn.GetAuthenticationExtensionsClientInputs{
+			PRFInputs: &webauthn.PRFInputs{
+				PRF: webauthn.AuthenticationExtensionsPRFInputs{
+					EvalByCredential: map[string]webauthn.AuthenticationExtensionsPRFValues{
 						credIDStr: {
 							First: []byte("first"),
 						},
@@ -228,17 +230,17 @@ func TestAuthenticatorGetCrossPlatformAssertion(t *testing.T) {
 		&AuthenticatorGetAssertionOptions{
 			AuthenticatorAttachment:     WinHelloAuthenticatorAttachmentCrossPlatform,
 			UserVerificationRequirement: WinHelloUserVerificationRequirementDiscouraged,
-			CredentialHints: []webauthntypes.PublicKeyCredentialHint{
-				webauthntypes.PublicKeyCredentialHintClientDevice,
-				webauthntypes.PublicKeyCredentialHintSecurityKey,
-				webauthntypes.PublicKeyCredentialHintHybrid,
+			CredentialHints: []credential.PublicKeyCredentialHint{
+				credential.PublicKeyCredentialHintClientDevice,
+				credential.PublicKeyCredentialHintSecurityKey,
+				credential.PublicKeyCredentialHintHybrid,
 			},
 		},
 	)
 	require.NoError(t, err)
 
 	// prf
-	assert.True(t, assertion.ExtensionOutputs.PRFOutputs.PRF.Enabled)
+	require.NotNil(t, assertion.ExtensionOutputs.GetPRFOutputs)
 	assert.Equal(
 		t,
 		[]byte{
@@ -247,7 +249,7 @@ func TestAuthenticatorGetCrossPlatformAssertion(t *testing.T) {
 			0x92, 0xc, 0xe0, 0xcc, 0xcd, 0xa5, 0x6b, 0x9e,
 			0x12, 0xfc, 0x6d, 0xab, 0xaf, 0x6, 0x10, 0x5c,
 		},
-		assertion.ExtensionOutputs.PRFOutputs.PRF.Results.First,
+		assertion.ExtensionOutputs.PRF.Results.First,
 	)
 
 	godump.Dump(assertion)

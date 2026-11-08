@@ -19,8 +19,9 @@ for Windows Hello biometrics and external security keys.
 
 ## Platform support
 
-Windows 10 or later. Individual API methods and extensions depend on the Windows
-WebAuthn API version and the selected authenticator.
+64-bit Windows 10 or later (`amd64` and `arm64`).
+Individual API methods and extensions depend on the Windows WebAuthn API version
+and the selected authenticator.
 
 ## Installation
 
@@ -72,6 +73,8 @@ existing credential in your application.
 - [x] WebAuthNDeletePlatformCredential
 - [x] WebAuthNGetApiVersionNumber
 - [x] WebAuthNGetCancellationId
+- [x] WebAuthNGetAuthenticatorList
+    - [x] WebAuthNFreeAuthenticatorList
 - [x] WebAuthNGetErrorName
 - [x] WebAuthNGetPlatformCredentialList
     - [x] WebAuthNFreePlatformCredentialList
@@ -85,12 +88,22 @@ Run tests and static checks in PowerShell on Windows:
 ```powershell
 go test ./...
 go vet ./...
+go mod tidy -diff
 ```
 
-To check compilation from macOS or Linux:
+Interactive tests create and delete credentials. Use a test authenticator or
+Windows account:
+
+```powershell
+$env:WINHELLO_TESTS = '1'
+go test -v .
+```
+
+To cross-compile from macOS or Linux:
 
 ```sh
-GOOS=windows go build ./...
+GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build ./...
+GOOS=windows GOARCH=arm64 CGO_ENABLED=0 go build ./...
 ```
 
 ## License
