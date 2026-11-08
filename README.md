@@ -62,9 +62,11 @@ func main() {
 
 ## Examples
 
-[`example/main.go`](example/main.go) demonstrates `GetAssertion`, a hidden window
-and PRF inputs. Adapt its relying party, client data and credential ID to an
-existing credential in your application.
+Run `go run ./example` on Windows. [`example/main.go`](example/main.go) creates a
+Windows Hello passkey for `example.org`, then uses it with `GetAssertion`.
+Both steps require user interaction. The example deletes its demo passkey when it finishes.
+It uses placeholder client data for a local API demonstration; a real application
+must supply its own client data and validate the registration and assertion responses.
 
 ## API coverage
 
