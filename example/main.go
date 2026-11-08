@@ -6,11 +6,11 @@ import (
 	"encoding/base64"
 	"log/slog"
 
-	"github.com/go-ctap/winhello"
-	"github.com/go-ctap/winhello/hiddenwindow"
 	"github.com/goforj/godump"
 	"github.com/telesma-app/ctap/credential"
 	"github.com/telesma-app/ctap/webauthn"
+	"github.com/telesma-app/winhello"
+	"github.com/telesma-app/winhello/hiddenwindow"
 )
 
 func main() {

@@ -8,13 +8,13 @@ import (
 	"os"
 	"testing"
 
-	"github.com/go-ctap/winhello/hiddenwindow"
 	"github.com/goforj/godump"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/telesma-app/ctap/cose"
 	"github.com/telesma-app/ctap/credential"
 	"github.com/telesma-app/ctap/webauthn"
+	"github.com/telesma-app/winhello/hiddenwindow"
 	"golang.org/x/sys/windows"
 )
 

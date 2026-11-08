@@ -6,6 +6,7 @@ package winhello
 import (
 	"bytes"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"unsafe"
 
@@ -35,9 +36,29 @@ var (
 	currVer                                                   = availableVersions(APIVersionNumber())
 )
 
+// Resolve every required entry point before starting an operation, including
+// its cleanup function so a missing export cannot leak native allocations.
+func requireWebAuthn(procs ...*windows.LazyProc) error {
+	if err := procWebAuthNGetApiVersionNumber.Find(); err != nil {
+		return fmt.Errorf("cannot use Windows WebAuthn API: %w: %w", errors.ErrUnsupported, err)
+	}
+
+	if APIVersionNumber() == 0 {
+		return fmt.Errorf("cannot use Windows WebAuthn API: %w", errors.ErrUnsupported)
+	}
+
+	for _, proc := range procs {
+		if err := proc.Find(); err != nil {
+			return fmt.Errorf("%s is unavailable: %w: %w", proc.Name, errors.ErrUnsupported, err)
+		}
+	}
+
+	return nil
+}
+
 // GetAssertion authenticates with a credential for rpID.
 // extInputs and winHelloOpts may be nil to use the default options.
-// Unsupported client extensions return an error wrapping errors.ErrUnsupported.
+// Unavailable APIs and unsupported client extensions return an error wrapping errors.ErrUnsupported.
 func GetAssertion(
 	hWnd windows.HWND,
 	rpID string,
@@ -48,6 +69,10 @@ func GetAssertion(
 ) (*WinHelloGetAssertionResponse, error) {
 	opts, err := getAssertionOptions(allowList, extInputs, winHelloOpts)
 	if err != nil {
+		return nil, err
+	}
+
+	if err := requireWebAuthn(procWebAuthNAuthenticatorGetAssertion, procWebAuthNFreeAssertion); err != nil {
 		return nil, err
 	}
 
@@ -248,7 +273,7 @@ func getAssertionOptions(
 
 // MakeCredential creates a credential for rp and user.
 // extInputs and winHelloOpts may be nil to use the default options.
-// Unsupported client extensions return an error wrapping errors.ErrUnsupported.
+// Unavailable APIs and unsupported client extensions return an error wrapping errors.ErrUnsupported.
 func MakeCredential(
 	hWnd windows.HWND,
 	clientData []byte,
@@ -260,6 +285,10 @@ func MakeCredential(
 	winHelloOpts *AuthenticatorMakeCredentialOptions,
 ) (*WinHelloMakeCredentialResponse, error) {
 	if err := validateMakeCredentialExtensions(extInputs, winHelloOpts); err != nil {
+		return nil, err
+	}
+
+	if err := requireWebAuthn(procWebAuthNAuthenticatorMakeCredential, procWebAuthNFreeCredentialAttestation); err != nil {
 		return nil, err
 	}
 
@@ -502,7 +531,12 @@ func makeCredentialOptions(
 }
 
 // CancelCurrentOperation cancels the operation using an ID obtained from CancellationID.
+// It returns an error wrapping errors.ErrUnsupported if the API is unavailable.
 func CancelCurrentOperation(cancellationID *windows.GUID) error {
+	if err := requireWebAuthn(procWebAuthNCancelCurrentOperation); err != nil {
+		return err
+	}
+
 	r1, _, _ := procWebAuthNCancelCurrentOperation.Call(
 		uintptr(unsafe.Pointer(cancellationID)),
 	)
@@ -513,8 +547,10 @@ func CancelCurrentOperation(cancellationID *windows.GUID) error {
 	return nil
 }
 
+// DeletePlatformCredential deletes the platform credential with the given ID.
+// It returns an error wrapping errors.ErrUnsupported if the API is unavailable.
 func DeletePlatformCredential(credentialID []byte) error {
-	if err := procWebAuthNDeletePlatformCredential.Find(); err != nil {
+	if err := requireWebAuthn(procWebAuthNDeletePlatformCredential); err != nil {
 		return err
 	}
 
@@ -529,12 +565,24 @@ func DeletePlatformCredential(credentialID []byte) error {
 	return nil
 }
 
+// APIVersionNumber returns the Windows WebAuthn API version, or 0 if unavailable.
 func APIVersionNumber() uint32 {
+	if err := procWebAuthNGetApiVersionNumber.Find(); err != nil {
+		return 0
+	}
+
 	r1, _, _ := procWebAuthNGetApiVersionNumber.Call()
+
 	return uint32(r1)
 }
 
+// CancellationID obtains an ID for cancelling a WebAuthn operation.
+// It returns an error wrapping errors.ErrUnsupported if the API is unavailable.
 func CancellationID() (*windows.GUID, error) {
+	if err := requireWebAuthn(procWebAuthNGetCancellationId); err != nil {
+		return nil, err
+	}
+
 	var cancellationIDPtr windows.GUID
 
 	r1, _, _ := procWebAuthNGetCancellationId.Call(
@@ -547,7 +595,12 @@ func CancellationID() (*windows.GUID, error) {
 	return &cancellationIDPtr, nil
 }
 
+// ErrorName returns the WebAuthn error name, or the hexadecimal HRESULT if the API is unavailable.
 func ErrorName(hr windows.Handle) string {
+	if err := requireWebAuthn(procWebAuthNGetErrorName); err != nil {
+		return fmt.Sprintf("HRESULT 0x%08X", uint32(hr))
+	}
+
 	r1, _, _ := procWebAuthNGetErrorName.Call(uintptr(hr))
 	// The return value points to static UTF-16 data owned by webauthn.dll.
 	return windows.UTF16PtrToString(*(**uint16)(unsafe.Pointer(&r1)))
@@ -565,8 +618,10 @@ type WebAuthnCredentialDetails struct {
 	Transports        []credential.AuthenticatorTransport
 }
 
+// PlatformCredentialList lists platform credentials, optionally filtered by RP ID.
+// It returns an error wrapping errors.ErrUnsupported if the API is unavailable.
 func PlatformCredentialList(rpID string, browserInPrivateMode bool) ([]*WebAuthnCredentialDetails, error) {
-	if err := procWebAuthNGetPlatformCredentialList.Find(); err != nil {
+	if err := requireWebAuthn(procWebAuthNGetPlatformCredentialList, procWebAuthNFreePlatformCredentialList); err != nil {
 		return nil, err
 	}
 
@@ -636,8 +691,10 @@ type WebAuthnAuthenticatorDetails struct {
 	Locked bool
 }
 
+// AuthenticatorList lists the available authenticators.
+// It returns an error wrapping errors.ErrUnsupported if the API is unavailable.
 func AuthenticatorList() ([]*WebAuthnAuthenticatorDetails, error) {
-	if err := procWebAuthNGetAuthenticatorList.Find(); err != nil {
+	if err := requireWebAuthn(procWebAuthNGetAuthenticatorList, procWebAuthNFreeAuthenticatorList); err != nil {
 		return nil, err
 	}
 
@@ -677,7 +734,12 @@ func AuthenticatorList() ([]*WebAuthnAuthenticatorDetails, error) {
 }
 
 // W3CExceptionDOMError maps a WebAuthn HRESULT to its W3C DOM exception code.
+// It returns hr unchanged if the API is unavailable.
 func W3CExceptionDOMError(hr windows.Handle) windows.Handle {
+	if err := requireWebAuthn(procWebAuthNGetW3CExceptionDOMError); err != nil {
+		return hr
+	}
+
 	r1, _, _ := procWebAuthNGetW3CExceptionDOMError.Call(
 		uintptr(hr),
 	)
@@ -685,7 +747,13 @@ func W3CExceptionDOMError(hr windows.Handle) windows.Handle {
 	return windows.Handle(uint32(r1))
 }
 
+// IsUserVerifyingPlatformAuthenticatorAvailable reports whether Windows Hello is available.
+// It returns an error wrapping errors.ErrUnsupported if the API is unavailable.
 func IsUserVerifyingPlatformAuthenticatorAvailable() (bool, error) {
+	if err := requireWebAuthn(procWebAuthNIsUserVerifyingPlatformAuthenticatorAvailable); err != nil {
+		return false, err
+	}
+
 	var isAvailable int32
 
 	r1, _, _ := procWebAuthNIsUserVerifyingPlatformAuthenticatorAvailable.Call(

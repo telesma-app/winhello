@@ -9,6 +9,10 @@ import (
 )
 
 func TestWebAuthnQueries(t *testing.T) {
+	if APIVersionNumber() == 0 {
+		t.Skip("Windows WebAuthn API is unavailable")
+	}
+
 	assert.GreaterOrEqual(t, APIVersionNumber(), uint32(1))
 
 	_, err := IsUserVerifyingPlatformAuthenticatorAvailable()
