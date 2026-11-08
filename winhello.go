@@ -387,8 +387,9 @@ func makeCredentialOptions(
 	if extInputs != nil {
 		exts := make([]_WEBAUTHN_EXTENSION, 0)
 
-		// Windows large-blob support requires a discoverable credential.
-		if extInputs.LargeBlobInputs != nil && winHelloOpts.RequireResidentKey && !winHelloOpts.PreferResidentKey {
+		// Windows rejects dwLargeBlobSupport=preferred/required unless bRequireResidentKey is TRUE.
+		// https://learn.microsoft.com/en-us/windows/win32/api/webauthn/ns-webauthn-webauthn_authenticator_make_credential_options#members
+		if extInputs.LargeBlobInputs != nil && winHelloOpts.RequireResidentKey {
 			opts.DwLargeBlobSupport = uint32(WinHelloLargeBlobSupportPreferred)
 			if extInputs.LargeBlob.Support == extension.LargeBlobSupportRequired {
 				opts.DwLargeBlobSupport = uint32(WinHelloLargeBlobSupportRequired)

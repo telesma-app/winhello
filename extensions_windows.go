@@ -71,8 +71,8 @@ func validateMakeCredentialExtensions(inputs *webauthn.CreateAuthenticationExten
 			return errors.New("largeBlob extension conflicts with Windows LargeBlobSupport option")
 		}
 
-		if blob.Support == extension.LargeBlobSupportRequired && (opts == nil || !opts.RequireResidentKey || opts.PreferResidentKey) {
-			return fmt.Errorf("required largeBlob support needs RequireResidentKey without PreferResidentKey on Windows: %w", errors.ErrUnsupported)
+		if blob.Support == extension.LargeBlobSupportRequired && (opts == nil || !opts.RequireResidentKey) {
+			return fmt.Errorf("required largeBlob support needs RequireResidentKey on Windows: %w", errors.ErrUnsupported)
 		}
 	}
 

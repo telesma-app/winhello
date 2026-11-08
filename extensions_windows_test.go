@@ -127,24 +127,29 @@ func TestGetHMACSaltValidation(t *testing.T) {
 }
 
 func TestLargeBlobOptions(t *testing.T) {
-	resident := &AuthenticatorMakeCredentialOptions{RequireResidentKey: true}
-
 	for _, tt := range []struct {
 		support extension.LargeBlobSupport
 		want    WinHelloLargeBlobSupport
 	}{{"", WinHelloLargeBlobSupportPreferred}, {extension.LargeBlobSupportPreferred, WinHelloLargeBlobSupportPreferred}, {extension.LargeBlobSupportRequired, WinHelloLargeBlobSupportRequired}} {
 		inputs := &webauthn.CreateAuthenticationExtensionsClientInputs{LargeBlobInputs: &webauthn.LargeBlobInputs{LargeBlob: webauthn.AuthenticationExtensionsLargeBlobInputs{Support: tt.support}}}
-		require.NoError(t, validateMakeCredentialExtensions(inputs, resident))
-		native := makeCredentialOptions(nil, inputs, resident)
-		assert.Equal(t, uint32(tt.want), native.DwLargeBlobSupport)
-		assert.Equal(t, int32(1), native.BRequireResidentKey)
 
-		err := validateMakeCredentialExtensions(inputs, nil)
-		if tt.support == extension.LargeBlobSupportRequired {
-			require.ErrorIs(t, err, errors.ErrUnsupported)
-		} else {
-			require.NoError(t, err)
-			assert.Zero(t, makeCredentialOptions(nil, inputs, nil).DwLargeBlobSupport)
+		for _, preferResidentKey := range []bool{false, true} {
+			resident := &AuthenticatorMakeCredentialOptions{RequireResidentKey: true, PreferResidentKey: preferResidentKey}
+			require.NoError(t, validateMakeCredentialExtensions(inputs, resident))
+			native := makeCredentialOptions(nil, inputs, resident)
+			assert.Equal(t, uint32(tt.want), native.DwLargeBlobSupport)
+			assert.Equal(t, int32(1), native.BRequireResidentKey)
+			assert.Equal(t, boolToInt32(preferResidentKey), native.BPreferResidentKey)
+		}
+
+		for _, opts := range []*AuthenticatorMakeCredentialOptions{nil, {}, {PreferResidentKey: true}} {
+			err := validateMakeCredentialExtensions(inputs, opts)
+			if tt.support == extension.LargeBlobSupportRequired {
+				require.ErrorIs(t, err, errors.ErrUnsupported)
+			} else {
+				require.NoError(t, err)
+				assert.Zero(t, makeCredentialOptions(nil, inputs, opts).DwLargeBlobSupport)
+			}
 		}
 
 		require.Error(t, validateMakeCredentialExtensions(inputs, &AuthenticatorMakeCredentialOptions{LargeBlobSupport: WinHelloLargeBlobSupportPreferred}))
