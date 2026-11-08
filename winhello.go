@@ -8,16 +8,16 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"log/slog"
-	"slices"
 	"unsafe"
 
-	"github.com/go-ctap/ctaphid/pkg/webauthntypes"
+	"github.com/telesma-app/ctap/credential"
+	"github.com/telesma-app/ctap/extension"
+	"github.com/telesma-app/ctap/webauthn"
 	"golang.org/x/sys/windows"
 )
 
 var (
-	modWebAuthn                                               = windows.NewLazyDLL("webauthn.dll")
+	modWebAuthn                                               = windows.NewLazySystemDLL("webauthn.dll")
 	procWebAuthNGetApiVersionNumber                           = modWebAuthn.NewProc("WebAuthNGetApiVersionNumber")
 	procWebAuthNIsUserVerifyingPlatformAuthenticatorAvailable = modWebAuthn.NewProc("WebAuthNIsUserVerifyingPlatformAuthenticatorAvailable")
 	procWebAuthNAuthenticatorMakeCredential                   = modWebAuthn.NewProc("WebAuthNAuthenticatorMakeCredential")
@@ -36,14 +36,56 @@ var (
 	currVer                                                   = availableVersions(APIVersionNumber())
 )
 
+// GetAssertion authenticates with a credential for rpID.
+// extInputs and winHelloOpts may be nil to use the default options.
 func GetAssertion(
 	hWnd windows.HWND,
 	rpID string,
 	clientData []byte,
-	allowList []webauthntypes.PublicKeyCredentialDescriptor,
-	extInputs *webauthntypes.GetAuthenticationExtensionsClientInputs,
+	allowList []credential.PublicKeyCredentialDescriptor,
+	extInputs *webauthn.GetAuthenticationExtensionsClientInputs,
 	winHelloOpts *AuthenticatorGetAssertionOptions,
 ) (*WinHelloGetAssertionResponse, error) {
+	opts, err := getAssertionOptions(allowList, extInputs, winHelloOpts)
+	if err != nil {
+		return nil, err
+	}
+
+	var assertionPtr *_WEBAUTHN_ASSERTION
+
+	r1, _, _ := procWebAuthNAuthenticatorGetAssertion.Call(
+		uintptr(hWnd),
+		uintptr(unsafe.Pointer(windows.StringToUTF16Ptr(rpID))),
+		uintptr(unsafe.Pointer(&_WEBAUTHN_CLIENT_DATA{
+			DwVersion:        currVer.clientData,
+			CbClientDataJSON: uint32(len(clientData)),
+			PbClientDataJSON: unsafe.SliceData(clientData),
+			PwszHashAlgId:    windows.StringToUTF16Ptr("SHA-256"),
+		})),
+		uintptr(unsafe.Pointer(opts)),
+		uintptr(unsafe.Pointer(&assertionPtr)),
+	)
+	if hr := windows.Errno(uint32(r1)); hr != 0 {
+		return nil, hr
+	}
+
+	defer procWebAuthNFreeAssertion.Call(uintptr(unsafe.Pointer(assertionPtr)))
+
+	resp, err := assertionPtr.ToGetAssertionResponse(extInputs)
+	if err != nil {
+		return nil, err
+	}
+	if opts.PbU2fAppId != nil {
+		resp.U2FAppIDUsed = int32ToBool(*opts.PbU2fAppId)
+	}
+	return resp, nil
+}
+
+func getAssertionOptions(
+	allowList []credential.PublicKeyCredentialDescriptor,
+	extInputs *webauthn.GetAuthenticationExtensionsClientInputs,
+	winHelloOpts *AuthenticatorGetAssertionOptions,
+) (*_WEBAUTHN_AUTHENTICATOR_GET_ASSERTION_OPTIONS, error) {
 	if winHelloOpts == nil {
 		winHelloOpts = &AuthenticatorGetAssertionOptions{}
 	}
@@ -70,29 +112,12 @@ func GetAssertion(
 
 	credExList := make([]*_WEBAUTHN_CREDENTIAL_EX, len(allowList))
 	for i, ex := range allowList {
-		dwTransports := uint32(0)
-		for _, tr := range ex.Transports {
-			switch tr {
-			case webauthntypes.AuthenticatorTransportUSB:
-				dwTransports |= uint32(WinHelloCTAPTransportUSB)
-			case webauthntypes.AuthenticatorTransportNFC:
-				dwTransports |= uint32(WinHelloCTAPTransportNFC)
-			case webauthntypes.AuthenticatorTransportBLE:
-				dwTransports |= uint32(WinHelloCTAPTransportBLE)
-			case webauthntypes.AuthenticatorTransportSmartCard:
-			case webauthntypes.AuthenticatorTransportHybrid:
-				dwTransports |= uint32(WinHelloCTAPTransportHybrid)
-			case webauthntypes.AuthenticatorTransportInternal:
-				dwTransports |= uint32(WinHelloCTAPTransportInternal)
-			}
-		}
-
 		credExList[i] = &_WEBAUTHN_CREDENTIAL_EX{
 			DwVersion:          currVer.credentialEx,
 			CbId:               uint32(len(ex.ID)),
 			PbId:               unsafe.SliceData(ex.ID),
 			PwszCredentialType: windows.StringToUTF16Ptr(string(ex.Type)),
-			DwTransports:       dwTransports,
+			DwTransports:       transportsToFlags(ex.Transports),
 		}
 	}
 	if len(credExList) > 0 {
@@ -113,8 +138,7 @@ func GetAssertion(
 
 	if winHelloOpts.U2FAppID != "" {
 		opts.PwszU2fAppId = windows.StringToUTF16Ptr(winHelloOpts.U2FAppID)
-		t := boolToInt32(true)
-		opts.PbU2fAppId = &t
+		opts.PbU2fAppId = new(int32)
 	}
 
 	if winHelloOpts.CredentialHints != nil {
@@ -135,9 +159,9 @@ func GetAssertion(
 		exts := make([]_WEBAUTHN_EXTENSION, 0)
 
 		// credBlob
-		if extInputs.GetCredentialBlobInputs != nil {
+		if extInputs.GetCredentialBlobInputs != nil && extInputs.GetCredentialBlobInputs.GetCredBlob {
 			ext := _WEBAUTHN_EXTENSION{
-				PwszExtensionIdentifier: windows.StringToUTF16Ptr(string(webauthntypes.ExtensionIdentifierCredentialBlob)),
+				PwszExtensionIdentifier: windows.StringToUTF16Ptr(string(extension.ExtensionIdentifierCredentialBlob)),
 			}
 
 			credBlob := boolToInt32(extInputs.GetCredentialBlobInputs.GetCredBlob)
@@ -167,7 +191,7 @@ func GetAssertion(
 		if extInputs.PRFInputs != nil {
 			opts.PHmacSecretSaltValues = new(_WEBAUTHN_HMAC_SECRET_SALT_VALUES)
 
-			if extInputs.PRFInputs.PRF.Eval != nil {
+			if !extInputs.PRFInputs.PRF.Eval.IsZero() {
 				opts.PHmacSecretSaltValues.PGlobalHmacSalt = &_WEBAUTHN_HMAC_SECRET_SALT{
 					CbFirst:  uint32(len(extInputs.PRFInputs.PRF.Eval.First)),
 					PbFirst:  unsafe.SliceData(extInputs.PRFInputs.PRF.Eval.First),
@@ -178,7 +202,7 @@ func GetAssertion(
 
 			var credWithHMACSecretSaltList []_WEBAUTHN_CRED_WITH_HMAC_SECRET_SALT
 			for credIDStr, values := range extInputs.PRFInputs.PRF.EvalByCredential {
-				credID, err := base64.URLEncoding.DecodeString(credIDStr)
+				credID, err := base64.RawURLEncoding.DecodeString(credIDStr)
 				if err != nil {
 					return nil, fmt.Errorf("failed to decode credential ID: %w", err)
 				}
@@ -205,80 +229,19 @@ func GetAssertion(
 		}
 	}
 
-	assertionPtr := new(_WEBAUTHN_ASSERTION)
-
-	r1, _, _ := procWebAuthNAuthenticatorGetAssertion.Call(
-		uintptr(hWnd),
-		uintptr(unsafe.Pointer(windows.StringToUTF16Ptr(rpID))),
-		uintptr(unsafe.Pointer(&_WEBAUTHN_CLIENT_DATA{
-			DwVersion:        currVer.clientData,
-			CbClientDataJSON: uint32(len(clientData)),
-			PbClientDataJSON: unsafe.SliceData(clientData),
-			PwszHashAlgId:    windows.StringToUTF16Ptr("SHA-256"),
-		})),
-		uintptr(unsafe.Pointer(opts)),
-		uintptr(unsafe.Pointer(&assertionPtr)),
-	)
-	if hr := windows.Handle(r1); hr != windows.S_OK {
-		return nil, windows.Errno(hr)
-	}
-
-	defer func() {
-		_, _, err := procWebAuthNFreeAssertion.Call(uintptr(unsafe.Pointer(assertionPtr)))
-		if err != nil && !errors.Is(err, windows.NTE_OP_OK) {
-			slog.Debug("Assertion free failed!", "err", err)
-		}
-	}()
-
-	resp, err := assertionPtr.ToGetAssertionResponse()
-	if err != nil {
-		return nil, err
-	}
-
-	resp.ExtensionOutputs = new(webauthntypes.GetAuthenticationExtensionsClientOutputs)
-	if resp.AuthData.Extensions != nil {
-		// hmac-secret
-		if extInputs != nil && extInputs.GetHMACSecretInputs != nil && resp.AuthData.Extensions.GetHMACSecretOutput != nil {
-			resp.ExtensionOutputs.GetHMACSecretOutputs = &webauthntypes.GetHMACSecretOutputs{
-				HMACGetSecret: webauthntypes.HMACGetSecretOutput{
-					Output1: resp.hmacSecret.First,
-					Output2: resp.hmacSecret.Second,
-				},
-			}
-		}
-
-		// credBlob
-		if resp.AuthData.Extensions.GetCredBlobOutput != nil {
-			resp.ExtensionOutputs.GetCredentialBlobOutputs = &webauthntypes.GetCredentialBlobOutputs{
-				GetCredBlob: resp.AuthData.Extensions.GetCredBlobOutput.CredBlob,
-			}
-		}
-
-		// prf
-		if extInputs != nil && extInputs.PRFInputs != nil && resp.AuthData.Extensions.GetHMACSecretOutput != nil {
-			resp.ExtensionOutputs.PRFOutputs = &webauthntypes.PRFOutputs{
-				PRF: webauthntypes.AuthenticationExtensionsPRFOutputs{
-					Enabled: true,
-					Results: webauthntypes.AuthenticationExtensionsPRFValues{
-						First:  resp.hmacSecret.First,
-						Second: resp.hmacSecret.Second,
-					},
-				},
-			}
-		}
-	}
-
-	return resp, nil
+	return opts, nil
 }
 
+// MakeCredential creates a credential for rp and user.
+// extInputs and winHelloOpts may be nil to use the default options.
 func MakeCredential(
 	hWnd windows.HWND,
 	clientData []byte,
-	rp webauthntypes.PublicKeyCredentialRpEntity,
-	user webauthntypes.PublicKeyCredentialUserEntity,
-	pubKeyCredParams []webauthntypes.PublicKeyCredentialParameters,
-	excludeList []webauthntypes.PublicKeyCredentialDescriptor,
-	extInputs *webauthntypes.CreateAuthenticationExtensionsClientInputs,
+	rp credential.PublicKeyCredentialRpEntity,
+	user credential.PublicKeyCredentialUserEntity,
+	pubKeyCredParams []credential.PublicKeyCredentialParameters,
+	excludeList []credential.PublicKeyCredentialDescriptor,
+	extInputs *webauthn.CreateAuthenticationExtensionsClientInputs,
 	winHelloOpts *AuthenticatorMakeCredentialOptions,
 ) (*WinHelloMakeCredentialResponse, error) {
 	coseCredentialParams := make([]_WEBAUTHN_COSE_CREDENTIAL_PARAMETER, len(pubKeyCredParams))
@@ -290,6 +253,51 @@ func MakeCredential(
 		}
 	}
 
+	opts := makeCredentialOptions(excludeList, extInputs, winHelloOpts)
+
+	var credAttestationPtr *_WEBAUTHN_CREDENTIAL_ATTESTATION
+
+	r1, _, _ := procWebAuthNAuthenticatorMakeCredential.Call(
+		uintptr(hWnd),
+		uintptr(unsafe.Pointer(&_WEBAUTHN_RP_ENTITY_INFORMATION{
+			DwVersion: currVer.rpEntityInformation,
+			PwszId:    windows.StringToUTF16Ptr(rp.ID),
+			PwszName:  windows.StringToUTF16Ptr(rp.Name),
+		})),
+		uintptr(unsafe.Pointer(&_WEBAUTHN_USER_ENTITY_INFORMATION{
+			DwVersion:       currVer.userEntityInformation,
+			CbId:            uint32(len(user.ID)),
+			PbId:            unsafe.SliceData(user.ID),
+			PwszName:        windows.StringToUTF16Ptr(user.Name),
+			PwszDisplayName: windows.StringToUTF16Ptr(user.DisplayName),
+		})),
+		uintptr(unsafe.Pointer(&_WEBAUTHN_COSE_CREDENTIAL_PARAMETERS{
+			CCredentialParameters: uint32(len(coseCredentialParams)),
+			PCredentialParameters: unsafe.SliceData(coseCredentialParams),
+		})),
+		uintptr(unsafe.Pointer(&_WEBAUTHN_CLIENT_DATA{
+			DwVersion:        currVer.clientData,
+			CbClientDataJSON: uint32(len(clientData)),
+			PbClientDataJSON: unsafe.SliceData(clientData),
+			PwszHashAlgId:    windows.StringToUTF16Ptr("SHA-256"),
+		})),
+		uintptr(unsafe.Pointer(opts)),
+		uintptr(unsafe.Pointer(&credAttestationPtr)),
+	)
+	if hr := windows.Errno(uint32(r1)); hr != 0 {
+		return nil, hr
+	}
+
+	defer procWebAuthNFreeCredentialAttestation.Call(uintptr(unsafe.Pointer(credAttestationPtr)))
+
+	return credAttestationPtr.ToMakeCredentialResponse(extInputs)
+}
+
+func makeCredentialOptions(
+	excludeList []credential.PublicKeyCredentialDescriptor,
+	extInputs *webauthn.CreateAuthenticationExtensionsClientInputs,
+	winHelloOpts *AuthenticatorMakeCredentialOptions,
+) *_WEBAUTHN_AUTHENTICATOR_MAKE_CREDENTIAL_OPTIONS {
 	if winHelloOpts == nil {
 		winHelloOpts = &AuthenticatorMakeCredentialOptions{}
 	}
@@ -318,30 +326,12 @@ func MakeCredential(
 
 	credExList := make([]*_WEBAUTHN_CREDENTIAL_EX, len(excludeList))
 	for i, ex := range excludeList {
-		dwTransports := uint32(0)
-		for _, tr := range ex.Transports {
-			switch tr {
-			case webauthntypes.AuthenticatorTransportUSB:
-				dwTransports |= uint32(WinHelloCTAPTransportUSB)
-			case webauthntypes.AuthenticatorTransportNFC:
-				dwTransports |= uint32(WinHelloCTAPTransportNFC)
-			case webauthntypes.AuthenticatorTransportBLE:
-				dwTransports |= uint32(WinHelloCTAPTransportBLE)
-			case webauthntypes.AuthenticatorTransportSmartCard:
-				dwTransports |= uint32(WinHelloCTAPTransportSmartCard)
-			case webauthntypes.AuthenticatorTransportHybrid:
-				dwTransports |= uint32(WinHelloCTAPTransportHybrid)
-			case webauthntypes.AuthenticatorTransportInternal:
-				dwTransports |= uint32(WinHelloCTAPTransportInternal)
-			}
-		}
-
 		credExList[i] = &_WEBAUTHN_CREDENTIAL_EX{
 			DwVersion:          currVer.credentialEx,
 			CbId:               uint32(len(ex.ID)),
 			PbId:               unsafe.SliceData(ex.ID),
 			PwszCredentialType: windows.StringToUTF16Ptr(string(ex.Type)),
-			DwTransports:       dwTransports,
+			DwTransports:       transportsToFlags(ex.Transports),
 		}
 	}
 	if len(credExList) > 0 {
@@ -378,10 +368,9 @@ func MakeCredential(
 		exts := make([]_WEBAUTHN_EXTENSION, 0)
 
 		// hmac-secret
-		if extInputs.CreateHMACSecretInputs != nil {
-			opts.BEnablePrf = boolToInt32(true)
+		if extInputs.CreateHMACSecretInputs != nil && extInputs.CreateHMACSecretInputs.HMACCreateSecret {
 			ext := _WEBAUTHN_EXTENSION{
-				PwszExtensionIdentifier: windows.StringToUTF16Ptr(string(webauthntypes.ExtensionIdentifierHMACSecret)),
+				PwszExtensionIdentifier: windows.StringToUTF16Ptr(string(extension.ExtensionIdentifierHMACSecret)),
 			}
 
 			hmacSecret := boolToInt32(extInputs.CreateHMACSecretInputs.HMACCreateSecret)
@@ -394,10 +383,10 @@ func MakeCredential(
 		if extInputs.CreateHMACSecretMCInputs != nil {
 			opts.BEnablePrf = boolToInt32(true)
 			opts.PPRFGlobalEval = &_WEBAUTHN_HMAC_SECRET_SALT{
-				CbFirst:  uint32(len(extInputs.PRFInputs.PRF.Eval.First)),
-				PbFirst:  unsafe.SliceData(extInputs.PRFInputs.PRF.Eval.First),
-				CbSecond: uint32(len(extInputs.PRFInputs.PRF.Eval.Second)),
-				PbSecond: unsafe.SliceData(extInputs.PRFInputs.PRF.Eval.Second),
+				CbFirst:  uint32(len(extInputs.CreateHMACSecretMCInputs.HMACGetSecret.Salt1)),
+				PbFirst:  unsafe.SliceData(extInputs.CreateHMACSecretMCInputs.HMACGetSecret.Salt1),
+				CbSecond: uint32(len(extInputs.CreateHMACSecretMCInputs.HMACGetSecret.Salt2)),
+				PbSecond: unsafe.SliceData(extInputs.CreateHMACSecretMCInputs.HMACGetSecret.Salt2),
 			}
 			opts.DwFlags |= WinHelloAuthenticatorHMACSecretValuesFlag
 		}
@@ -405,27 +394,29 @@ func MakeCredential(
 		// prf
 		if extInputs.PRFInputs != nil {
 			opts.BEnablePrf = boolToInt32(true)
-			opts.PPRFGlobalEval = &_WEBAUTHN_HMAC_SECRET_SALT{
-				CbFirst:  uint32(len(extInputs.PRFInputs.PRF.Eval.First)),
-				PbFirst:  unsafe.SliceData(extInputs.PRFInputs.PRF.Eval.First),
-				CbSecond: uint32(len(extInputs.PRFInputs.PRF.Eval.Second)),
-				PbSecond: unsafe.SliceData(extInputs.PRFInputs.PRF.Eval.Second),
+			if !extInputs.PRFInputs.PRF.Eval.IsZero() {
+				opts.PPRFGlobalEval = &_WEBAUTHN_HMAC_SECRET_SALT{
+					CbFirst:  uint32(len(extInputs.PRFInputs.PRF.Eval.First)),
+					PbFirst:  unsafe.SliceData(extInputs.PRFInputs.PRF.Eval.First),
+					CbSecond: uint32(len(extInputs.PRFInputs.PRF.Eval.Second)),
+					PbSecond: unsafe.SliceData(extInputs.PRFInputs.PRF.Eval.Second),
+				}
 			}
 		}
 
 		// credProtect
 		if extInputs.CreateCredentialProtectionInputs != nil {
 			ext := _WEBAUTHN_EXTENSION{
-				PwszExtensionIdentifier: windows.StringToUTF16Ptr(string(webauthntypes.ExtensionIdentifierCredentialProtection)),
+				PwszExtensionIdentifier: windows.StringToUTF16Ptr(string(extension.ExtensionIdentifierCredentialProtection)),
 			}
 
 			credProtectValue := WinHelloUserVerificationAny
 			switch extInputs.CreateCredentialProtectionInputs.CredentialProtectionPolicy {
-			case webauthntypes.CredentialProtectionPolicyUserVerificationOptional:
+			case extension.CredentialProtectionPolicyUserVerificationOptional:
 				credProtectValue = WinHelloUserVerificationOptional
-			case webauthntypes.CredentialProtectionPolicyUserVerificationOptionalWithCredentialIDList:
+			case extension.CredentialProtectionPolicyUserVerificationOptionalWithCredentialIDList:
 				credProtectValue = WinHelloUserVerificationOptionalWithCredentialIDList
-			case webauthntypes.CredentialProtectionPolicyUserVerificationRequired:
+			case extension.CredentialProtectionPolicyUserVerificationRequired:
 				credProtectValue = WinHelloUserVerificationRequired
 			}
 
@@ -442,7 +433,7 @@ func MakeCredential(
 		// credBlob
 		if extInputs.CreateCredentialBlobInputs != nil && extInputs.CreateCredentialBlobInputs.CredBlob != nil {
 			ext := _WEBAUTHN_EXTENSION{
-				PwszExtensionIdentifier: windows.StringToUTF16Ptr(string(webauthntypes.ExtensionIdentifierCredentialBlob)),
+				PwszExtensionIdentifier: windows.StringToUTF16Ptr(string(extension.ExtensionIdentifierCredentialBlob)),
 			}
 
 			credBlob := _WEBAUTHN_CRED_BLOB_EXTENSION{
@@ -456,9 +447,9 @@ func MakeCredential(
 		}
 
 		// minPinLength
-		if extInputs.CreateMinPinLengthInputs != nil {
+		if extInputs.CreateMinPinLengthInputs != nil && extInputs.CreateMinPinLengthInputs.MinPinLength {
 			ext := _WEBAUTHN_EXTENSION{
-				PwszExtensionIdentifier: windows.StringToUTF16Ptr(string(webauthntypes.ExtensionIdentifierMinPinLength)),
+				PwszExtensionIdentifier: windows.StringToUTF16Ptr(string(extension.ExtensionIdentifierMinPinLength)),
 			}
 
 			minPinLength := boolToInt32(extInputs.CreateMinPinLengthInputs.MinPinLength)
@@ -473,98 +464,31 @@ func MakeCredential(
 		}
 	}
 
-	credAttestationPtr := new(_WEBAUTHN_CREDENTIAL_ATTESTATION)
-
-	r1, _, _ := procWebAuthNAuthenticatorMakeCredential.Call(
-		uintptr(hWnd),
-		uintptr(unsafe.Pointer(&_WEBAUTHN_RP_ENTITY_INFORMATION{
-			DwVersion: currVer.rpEntityInformation,
-			PwszId:    windows.StringToUTF16Ptr(rp.ID),
-			PwszName:  windows.StringToUTF16Ptr(rp.Name),
-		})),
-		uintptr(unsafe.Pointer(&_WEBAUTHN_USER_ENTITY_INFORMATION{
-			DwVersion:       currVer.userEntityInformation,
-			CbId:            uint32(len(user.ID)),
-			PbId:            unsafe.SliceData(user.ID),
-			PwszName:        windows.StringToUTF16Ptr(user.Name),
-			PwszDisplayName: windows.StringToUTF16Ptr(user.DisplayName),
-		})),
-		uintptr(unsafe.Pointer(&_WEBAUTHN_COSE_CREDENTIAL_PARAMETERS{
-			CCredentialParameters: uint32(len(coseCredentialParams)),
-			PCredentialParameters: unsafe.SliceData(coseCredentialParams),
-		})),
-		uintptr(unsafe.Pointer(&_WEBAUTHN_CLIENT_DATA{
-			DwVersion:        currVer.clientData,
-			CbClientDataJSON: uint32(len(clientData)),
-			PbClientDataJSON: unsafe.SliceData(clientData),
-			PwszHashAlgId:    windows.StringToUTF16Ptr("SHA-256"),
-		})),
-		uintptr(unsafe.Pointer(opts)),
-		uintptr(unsafe.Pointer(&credAttestationPtr)),
-	)
-	if hr := windows.Handle(r1); hr != windows.S_OK {
-		return nil, windows.Errno(hr)
-	}
-
-	defer func() {
-		_, _, err := procWebAuthNFreeCredentialAttestation.Call(uintptr(unsafe.Pointer(credAttestationPtr)))
-		if err != nil && !errors.Is(err, windows.NTE_OP_OK) {
-			slog.Debug("Credential Attestation free failed!", "err", err)
-		}
-	}()
-
-	resp, err := credAttestationPtr.ToMakeCredentialResponse()
-	if err != nil {
-		return nil, err
-	}
-
-	resp.ExtensionOutputs = new(webauthntypes.CreateAuthenticationExtensionsClientOutputs)
-
-	if extInputs != nil && extInputs.CreateCredentialPropertiesInputs != nil {
-		resp.ExtensionOutputs.CreateCredentialPropertiesOutputs = &webauthntypes.CreateCredentialPropertiesOutputs{
-			CredentialProperties: webauthntypes.CredentialPropertiesOutput{
-				ResidentKey: resp.ResidentKey,
-			},
-		}
-	}
-
-	if resp.AuthData.Extensions != nil {
-		if resp.AuthData.Extensions.CreateCredBlobOutput != nil {
-			resp.ExtensionOutputs.CreateCredentialBlobOutputs = &webauthntypes.CreateCredentialBlobOutputs{
-				CredBlob: resp.AuthData.Extensions.CredBlob,
-			}
-		}
-
-		if resp.AuthData.Extensions.CreateHMACSecretOutput != nil {
-			resp.ExtensionOutputs.CreateHMACSecretOutputs = &webauthntypes.CreateHMACSecretOutputs{
-				HMACCreateSecret: resp.AuthData.Extensions.CreateHMACSecretOutput.HMACSecret,
-			}
-		}
-	}
-
-	return resp, nil
+	return opts
 }
 
-func CancelCurrentOperation() (*windows.GUID, error) {
-	var cancellationIDPtr windows.GUID
-
+// CancelCurrentOperation cancels the operation using an ID obtained from CancellationID.
+func CancelCurrentOperation(cancellationID *windows.GUID) error {
 	r1, _, _ := procWebAuthNCancelCurrentOperation.Call(
-		uintptr(unsafe.Pointer(&cancellationIDPtr)),
+		uintptr(unsafe.Pointer(cancellationID)),
 	)
-	if hr := windows.Handle(r1); hr != windows.S_OK {
-		return nil, windows.Errno(hr)
+	if hr := windows.Errno(uint32(r1)); hr != 0 {
+		return hr
 	}
 
-	return &cancellationIDPtr, nil
+	return nil
 }
 
 func DeletePlatformCredential(credentialID []byte) error {
+	if err := procWebAuthNDeletePlatformCredential.Find(); err != nil {
+		return err
+	}
 	r1, _, _ := procWebAuthNDeletePlatformCredential.Call(
 		uintptr(len(credentialID)),
 		uintptr(unsafe.Pointer(&credentialID[0])),
 	)
-	if hr := windows.Handle(r1); hr != windows.S_OK {
-		return windows.Errno(hr)
+	if hr := windows.Errno(uint32(r1)); hr != 0 {
+		return hr
 	}
 
 	return nil
@@ -581,8 +505,8 @@ func CancellationID() (*windows.GUID, error) {
 	r1, _, _ := procWebAuthNGetCancellationId.Call(
 		uintptr(unsafe.Pointer(&cancellationIDPtr)),
 	)
-	if hr := windows.Handle(r1); hr != windows.S_OK {
-		return nil, windows.Errno(hr)
+	if hr := windows.Errno(uint32(r1)); hr != 0 {
+		return nil, hr
 	}
 
 	return &cancellationIDPtr, nil
@@ -590,28 +514,32 @@ func CancellationID() (*windows.GUID, error) {
 
 func ErrorName(hr windows.Handle) string {
 	r1, _, _ := procWebAuthNGetErrorName.Call(uintptr(hr))
-	return windows.UTF16PtrToString((*uint16)(unsafe.Pointer(r1)))
+	// The return value points to static UTF-16 data owned by webauthn.dll.
+	return windows.UTF16PtrToString(*(**uint16)(unsafe.Pointer(&r1)))
 }
 
 type WebAuthnCredentialDetails struct {
 	CredentialID      []byte
-	RP                webauthntypes.PublicKeyCredentialRpEntity
-	User              webauthntypes.PublicKeyCredentialUserEntity
+	RP                credential.PublicKeyCredentialRpEntity
+	User              credential.PublicKeyCredentialUserEntity
 	Removable         bool
 	BackedUp          bool
 	AuthenticatorName string
 	AuthenticatorLogo []byte
 	ThirdPartyPayment bool
-	Transports        []webauthntypes.AuthenticatorTransport
+	Transports        []credential.AuthenticatorTransport
 }
 
 func PlatformCredentialList(rpID string, browserInPrivateMode bool) ([]*WebAuthnCredentialDetails, error) {
+	if err := procWebAuthNGetPlatformCredentialList.Find(); err != nil {
+		return nil, err
+	}
 	var rpIDPtr *uint16
 	if rpID != "" {
 		rpIDPtr = windows.StringToUTF16Ptr(rpID)
 	}
 
-	credDetailsListPtr := new(_WEBAUTHN_CREDENTIAL_DETAILS_LIST)
+	var credDetailsListPtr *_WEBAUTHN_CREDENTIAL_DETAILS_LIST
 
 	r1, _, _ := procWebAuthNGetPlatformCredentialList.Call(
 		uintptr(unsafe.Pointer(&_WEBAUTHN_GET_CREDENTIALS_OPTIONS{
@@ -621,11 +549,12 @@ func PlatformCredentialList(rpID string, browserInPrivateMode bool) ([]*WebAuthn
 		})),
 		uintptr(unsafe.Pointer(&credDetailsListPtr)),
 	)
-	if hr := windows.Handle(r1); hr != windows.S_OK {
-		return nil, windows.Errno(hr)
+	if hr := windows.Errno(uint32(r1)); hr != 0 {
+		return nil, hr
 	}
 
-	credListDetails := slices.Clone(unsafe.Slice(credDetailsListPtr.PpCredentialDetails, credDetailsListPtr.CCredentialDetails))
+	defer procWebAuthNFreePlatformCredentialList.Call(uintptr(unsafe.Pointer(credDetailsListPtr)))
+	credListDetails := unsafe.Slice(credDetailsListPtr.PpCredentialDetails, credDetailsListPtr.CCredentialDetails)
 
 	list := make([]*WebAuthnCredentialDetails, len(credListDetails))
 	for i, cred := range credListDetails {
@@ -633,11 +562,11 @@ func PlatformCredentialList(rpID string, browserInPrivateMode bool) ([]*WebAuthn
 
 		list[i] = &WebAuthnCredentialDetails{
 			CredentialID: credID,
-			RP: webauthntypes.PublicKeyCredentialRpEntity{
+			RP: credential.PublicKeyCredentialRpEntity{
 				ID:   windows.UTF16PtrToString(cred.PRpInformation.PwszId),
 				Name: windows.UTF16PtrToString(cred.PRpInformation.PwszName),
 			},
-			User: webauthntypes.PublicKeyCredentialUserEntity{
+			User: credential.PublicKeyCredentialUserEntity{
 				ID:          bytes.Clone(unsafe.Slice(cred.PUserInformation.PbId, cred.PUserInformation.CbId)),
 				DisplayName: windows.UTF16PtrToString(cred.PUserInformation.PwszDisplayName),
 				Name:        windows.UTF16PtrToString(cred.PUserInformation.PwszName),
@@ -660,12 +589,6 @@ func PlatformCredentialList(rpID string, browserInPrivateMode bool) ([]*WebAuthn
 		}
 	}
 
-	if _, _, err := procWebAuthNFreePlatformCredentialList.Call(
-		uintptr(unsafe.Pointer(credDetailsListPtr)),
-	); !errors.Is(err, windows.NTE_OP_OK) {
-		return nil, err
-	}
-
 	return list, nil
 }
 
@@ -677,7 +600,10 @@ type WebAuthnAuthenticatorDetails struct {
 }
 
 func AuthenticatorList() ([]*WebAuthnAuthenticatorDetails, error) {
-	authenticatorListPtr := new(_WEBAUTHN_AUTHENTICATOR_DETAILS_LIST)
+	if err := procWebAuthNGetAuthenticatorList.Find(); err != nil {
+		return nil, err
+	}
+	var authenticatorListPtr *_WEBAUTHN_AUTHENTICATOR_DETAILS_LIST
 
 	r1, _, _ := procWebAuthNGetAuthenticatorList.Call(
 		uintptr(unsafe.Pointer(&_WEBAUTHN_AUTHENTICATOR_DETAILS_OPTIONS{
@@ -685,14 +611,15 @@ func AuthenticatorList() ([]*WebAuthnAuthenticatorDetails, error) {
 		})),
 		uintptr(unsafe.Pointer(&authenticatorListPtr)),
 	)
-	if hr := windows.Handle(r1); hr != windows.S_OK {
-		return nil, windows.Errno(hr)
+	if hr := windows.Errno(uint32(r1)); hr != 0 {
+		return nil, hr
 	}
 
-	authenticatorListDetails := slices.Clone(unsafe.Slice(
+	defer procWebAuthNFreeAuthenticatorList.Call(uintptr(unsafe.Pointer(authenticatorListPtr)))
+	authenticatorListDetails := unsafe.Slice(
 		authenticatorListPtr.PpAuthenticatorDetails,
 		authenticatorListPtr.CAuthenticatorDetails,
-	))
+	)
 
 	list := make([]*WebAuthnAuthenticatorDetails, len(authenticatorListDetails))
 	for i, cred := range authenticatorListDetails {
@@ -707,37 +634,26 @@ func AuthenticatorList() ([]*WebAuthnAuthenticatorDetails, error) {
 		}
 	}
 
-	if _, _, err := procWebAuthNFreeAuthenticatorList.Call(
-		uintptr(unsafe.Pointer(authenticatorListPtr)),
-	); !errors.Is(err, windows.NTE_OP_OK) {
-		return nil, err
-	}
-
 	return list, nil
 }
 
-func W3CExceptionDOMError() (windows.Handle, error) {
-	var ret windows.Handle
-
+// W3CExceptionDOMError maps a WebAuthn HRESULT to its W3C DOM exception code.
+func W3CExceptionDOMError(hr windows.Handle) windows.Handle {
 	r1, _, _ := procWebAuthNGetW3CExceptionDOMError.Call(
-		uintptr(unsafe.Pointer(&ret)),
+		uintptr(hr),
 	)
-	if hr := windows.Handle(r1); hr != windows.S_OK {
-		return 0, windows.Errno(hr)
-	}
-
-	return ret, nil
+	return windows.Handle(uint32(r1))
 }
 
 func IsUserVerifyingPlatformAuthenticatorAvailable() (bool, error) {
-	var isAvailable bool
+	var isAvailable int32
 
 	r1, _, _ := procWebAuthNIsUserVerifyingPlatformAuthenticatorAvailable.Call(
 		uintptr(unsafe.Pointer(&isAvailable)),
 	)
-	if hr := windows.Handle(r1); hr != windows.S_OK {
-		return false, windows.Errno(hr)
+	if hr := windows.Errno(uint32(r1)); hr != 0 {
+		return false, hr
 	}
 
-	return isAvailable, nil
+	return int32ToBool(isAvailable), nil
 }

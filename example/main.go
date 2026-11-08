@@ -6,10 +6,11 @@ import (
 	"encoding/base64"
 	"log/slog"
 
-	"github.com/go-ctap/ctaphid/pkg/webauthntypes"
 	"github.com/go-ctap/winhello"
 	"github.com/go-ctap/winhello/hiddenwindow"
 	"github.com/goforj/godump"
+	"github.com/telesma-app/ctap/credential"
+	"github.com/telesma-app/ctap/webauthn"
 )
 
 func main() {
@@ -20,22 +21,25 @@ func main() {
 	defer wnd.Close()
 
 	credIDStr := "ruDDeY_rT2Jv25HOJCY5LhTUXlX1DrIaAYVTXrumUtU5qNvr9uo77UekHDMiu1TEIRgw20ptOx841RsVZl--iofFQXkc0vIZ0-gpXZtw5g138QI0a1d4WBQbF7F1PbpC"
-	credID, _ := base64.URLEncoding.DecodeString(credIDStr)
+	credID, err := base64.RawURLEncoding.DecodeString(credIDStr)
+	if err != nil {
+		panic(err)
+	}
 
 	assertion, err := winhello.GetAssertion(
 		wnd.WindowHandle(),
 		"example.org",
 		[]byte("{}"),
-		[]webauthntypes.PublicKeyCredentialDescriptor{
+		[]credential.PublicKeyCredentialDescriptor{
 			{
 				ID:   credID,
-				Type: webauthntypes.PublicKeyCredentialTypePublicKey,
+				Type: credential.PublicKeyCredentialTypePublicKey,
 			},
 		},
-		&webauthntypes.GetAuthenticationExtensionsClientInputs{
-			PRFInputs: &webauthntypes.PRFInputs{
-				PRF: webauthntypes.AuthenticationExtensionsPRFInputs{
-					EvalByCredential: map[string]webauthntypes.AuthenticationExtensionsPRFValues{
+		&webauthn.GetAuthenticationExtensionsClientInputs{
+			PRFInputs: &webauthn.PRFInputs{
+				PRF: webauthn.AuthenticationExtensionsPRFInputs{
+					EvalByCredential: map[string]webauthn.AuthenticationExtensionsPRFValues{
 						credIDStr: {
 							First: []byte("first"),
 						},
@@ -46,8 +50,8 @@ func main() {
 		&winhello.AuthenticatorGetAssertionOptions{
 			AuthenticatorAttachment:     winhello.WinHelloAuthenticatorAttachmentCrossPlatform,
 			UserVerificationRequirement: winhello.WinHelloUserVerificationRequirementDiscouraged,
-			CredentialHints: []webauthntypes.PublicKeyCredentialHint{
-				webauthntypes.PublicKeyCredentialHintSecurityKey,
+			CredentialHints: []credential.PublicKeyCredentialHint{
+				credential.PublicKeyCredentialHintSecurityKey,
 			},
 		},
 	)

@@ -7,20 +7,57 @@ on:
   pull_request:
     branches: [ master ]
 
+permissions:
+  contents: read
+
+env:
+  CGO_ENABLED: '0'
+  GOTOOLCHAIN: local
+
 jobs:
   build:
-    runs-on: windows-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
     - uses: actions/checkout@v7
 
     - name: Set up Go
-      uses: actions/setup-go@v6
+      uses: actions/setup-go@v7
       with:
-        go-version: '1.24'
-        check-latest: true
+        go-version-file: go.mod
+
+    - name: Check formatting
+      shell: bash
+      run: |
+        files=$(gofmt -l .)
+        if [ -n "$files" ]; then
+          printf '%s\n' "$files"
+          exit 1
+        fi
+
+    - name: Check module files
+      run: go mod tidy -diff
 
     - name: Build
       run: go build -v ./...
 
     - name: Test
       run: go test -v ./...
+
+    - name: Vet
+      run: go vet ./...
+
+    - name: Check window lifecycle with race detector
+      if: runner.os == 'Windows'
+      env:
+        CGO_ENABLED: '1'
+      run: go test -race -count=10 -timeout=2m ./hiddenwindow
+
+    - name: Build Windows ARM64
+      if: runner.os == 'Linux'
+      env:
+        GOOS: windows
+        GOARCH: arm64
+      run: go build -v ./...
