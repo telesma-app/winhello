@@ -1,21 +1,68 @@
-# winhello
+# telesma-app/winhello
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/go-ctap/winhello.svg)](https://pkg.go.dev/github.com/go-ctap/winhello)
-[![Go](https://github.com/go-ctap/winhello/actions/workflows/go.yml/badge.svg)](https://github.com/go-ctap/winhello/actions/workflows/go.yml)
+[![Go](https://github.com/telesma-app/winhello/actions/workflows/go.yml/badge.svg)](https://github.com/telesma-app/winhello/actions/workflows/go.yml)
 
-winhello is a Go library that provides bindings to the Windows WebAuthn API (Windows Hello), enabling authentication
-using Windows Hello biometrics or security keys in Go applications.
+`telesma-app/winhello` provides cgo-free Go bindings to the Windows WebAuthn API
+for Windows Hello biometrics and external security keys.
+
+> [!WARNING]
+> This module is under active development. Its public API may change during `v0.x`.
 
 ## Features
 
-- Create and manage WebAuthn credentials.
-- Authenticate users with Windows Hello.
-- Support for WebAuthn extensions (`hmac-secret`, `prf`, `credBlob`, etc.)
-- `cgo`-free implementation (plain syscalls).
-- Windows Hello requires a window handle (hWnd) to work, `hiddenwindow` package allows making
-  one without going into hassle with Windows API.
+- WebAuthn credential creation, assertions and platform credential management.
+- Windows Hello availability and WebAuthn API version queries.
+- WebAuthn extensions including `hmac-secret`, `prf` and `credBlob`.
+- Native Windows calls without a C toolchain.
+- A `hiddenwindow` package for operations requiring a window handle.
 
-## Method support
+## Platform support
+
+Windows 10 or later. Individual API methods and extensions depend on the Windows
+WebAuthn API version and the selected authenticator.
+
+## Installation
+
+```sh
+go get github.com/go-ctap/winhello@latest
+```
+
+The module path remains `github.com/go-ctap/winhello`; use that path for imports.
+See [`go.mod`](go.mod) for the required Go version.
+
+## Quick start
+
+On Windows, query the native API version and Windows Hello availability:
+
+```go
+package main
+
+import (
+	"fmt"
+	"log"
+
+	"github.com/go-ctap/winhello"
+)
+
+func main() {
+	fmt.Printf("WebAuthn API version: %d\n", winhello.APIVersionNumber())
+
+	available, err := winhello.IsUserVerifyingPlatformAuthenticatorAvailable()
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("Windows Hello available: %t\n", available)
+}
+```
+
+## Examples
+
+[`example/main.go`](example/main.go) demonstrates `GetAssertion`, a hidden window
+and PRF inputs. Adapt its relying party, client data and credential ID to an
+existing credential in your application.
+
+## API coverage
 
 - [x] WebAuthNAuthenticatorGetAssertion
     - [x] WebAuthNFreeAssertion
@@ -31,17 +78,22 @@ using Windows Hello biometrics or security keys in Go applications.
 - [x] WebAuthNGetW3CExceptionDOMError
 - [x] WebAuthNIsUserVerifyingPlatformAuthenticatorAvailable
 
-## Installation
+## Development
 
-```bash
-go get github.com/go-ctap/winhello
+Run tests and static checks in PowerShell on Windows:
+
+```powershell
+$env:GOWORK = "off"
+go test ./...
+go vet ./...
 ```
 
-## Usage
+To check compilation from macOS or Linux:
 
-See a small [example](/example).
+```sh
+GOWORK=off GOOS=windows go build ./...
+```
 
-## Requirements
+## License
 
-- Windows 10 or later
-- Go 1.24 or later
+[Apache License 2.0](LICENSE).
