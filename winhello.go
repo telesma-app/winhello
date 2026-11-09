@@ -159,14 +159,7 @@ func getAssertionOptions(
 		}
 	}
 
-	if winHelloOpts.CancellationID != nil {
-		opts.PCancellationId = &_GUID{
-			Data1: winHelloOpts.CancellationID.Data1,
-			Data2: winHelloOpts.CancellationID.Data2,
-			Data3: winHelloOpts.CancellationID.Data3,
-			Data4: winHelloOpts.CancellationID.Data4,
-		}
-	}
+	opts.PCancellationId = (*_GUID)(winHelloOpts.CancellationID)
 
 	if winHelloOpts.U2FAppID != "" {
 		opts.PwszU2fAppId = windows.StringToUTF16Ptr(winHelloOpts.U2FAppID)
@@ -390,14 +383,7 @@ func makeCredentialOptions(
 		}
 	}
 
-	if winHelloOpts.CancellationID != nil {
-		opts.PCancellationId = &_GUID{
-			Data1: winHelloOpts.CancellationID.Data1,
-			Data2: winHelloOpts.CancellationID.Data2,
-			Data3: winHelloOpts.CancellationID.Data3,
-			Data4: winHelloOpts.CancellationID.Data4,
-		}
-	}
+	opts.PCancellationId = (*_GUID)(winHelloOpts.CancellationID)
 
 	if winHelloOpts.CredentialHints != nil {
 		credHints := make([]*uint16, len(winHelloOpts.CredentialHints))
@@ -556,7 +542,7 @@ func DeletePlatformCredential(credentialID []byte) error {
 
 	r1, _, _ := procWebAuthNDeletePlatformCredential.Call(
 		uintptr(len(credentialID)),
-		uintptr(unsafe.Pointer(&credentialID[0])),
+		uintptr(unsafe.Pointer(unsafe.SliceData(credentialID))),
 	)
 	if hr := windows.Errno(uint32(r1)); hr != 0 {
 		return hr
