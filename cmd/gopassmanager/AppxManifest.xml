@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Package
+        xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+        xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+        xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+        xmlns:com4="http://schemas.microsoft.com/appx/manifest/com/windows10/4"
+        xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5"
+        xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
+        xmlns:desktop6="http://schemas.microsoft.com/appx/manifest/desktop/windows10/6"
+        IgnorableNamespaces="uap rescap com4 uap5 uap10 desktop6">
+
+    <Identity
+            Name="GoPassManager"
+            Publisher="CN=GoPass"
+            Version="1.0.0.0"
+            ProcessorArchitecture="neutral"/>
+
+    <Properties>
+        <DisplayName>WinHello Passkey Demo</DisplayName>
+        <PublisherDisplayName>WinHello</PublisherDisplayName>
+        <Logo>Assets\StoreLogo.png</Logo>
+        <uap10:AllowExternalContent>true</uap10:AllowExternalContent>
+        <desktop6:RegistryWriteVirtualization>disabled</desktop6:RegistryWriteVirtualization>
+        <desktop6:FileSystemWriteVirtualization>disabled</desktop6:FileSystemWriteVirtualization>
+    </Properties>
+
+    <Dependencies>
+        <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.26100.6725" MaxVersionTested="10.0.26200.6725"/>
+    </Dependencies>
+
+    <Resources>
+        <Resource Language="en-us"/>
+    </Resources>
+
+    <Applications>
+        <Application Id="GoPassManager" Executable="plugin.exe" uap10:SupportsMultipleInstances="true" uap10:TrustLevel="mediumIL"
+                     uap10:RuntimeBehavior="win32App">
+            <uap:VisualElements
+                    AppListEntry="none"
+                    DisplayName="WinHello Passkey Demo"
+                    Description="WebAuthn Plugin Test Application"
+                    BackgroundColor="transparent"
+                    Square150x150Logo="Assets\Square150x150Logo.png"
+                    Square44x44Logo="Assets\Square44x44Logo.png">
+            </uap:VisualElements>
+            <Extensions>
+                <uap5:Extension Category="windows.appExecutionAlias">
+                    <uap5:AppExecutionAlias uap10:Subsystem="console">
+                        <uap5:ExecutionAlias Alias="winhello-plugin.exe"/>
+                    </uap5:AppExecutionAlias>
+                </uap5:Extension>
+                <com4:Extension Category="windows.comServer">
+                    <com4:ComServer>
+                        <com4:ExeServer Executable="plugin.exe" DisplayName="WinHello Passkey Demo">
+                            <com4:Class
+                                    ProgId="GoPass.Manager.1"
+                                    VersionIndependentProgId="GoPass.Manager"
+                                    Id="1537ff70-8f94-495b-bad1-bcff96311d5f"
+                                    DisplayName="WinHello Passkey Demo"/>
+                        </com4:ExeServer>
+                        <com4:ProgId Id="GoPass.Manager" CurrentVersion="GoPass.Manager.1"/>
+                        <com4:ProgId Id="GoPass.Manager.1" Clsid="1537ff70-8f94-495b-bad1-bcff96311d5f"/>
+                    </com4:ComServer>
+                </com4:Extension>
+            </Extensions>
+        </Application>
+    </Applications>
+
+    <Capabilities>
+        <rescap:Capability Name="runFullTrust"/>
+        <rescap:Capability Name="unvirtualizedResources"/>
+    </Capabilities>
+</Package>

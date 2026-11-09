@@ -14,7 +14,7 @@ import (
 	"github.com/telesma-app/ctap/cose"
 	"github.com/telesma-app/ctap/credential"
 	"github.com/telesma-app/ctap/webauthn"
-	"github.com/telesma-app/winhello/hiddenwindow"
+	"github.com/telesma-app/winhello/pkg/hiddenwindow"
 	"golang.org/x/sys/windows"
 )
 

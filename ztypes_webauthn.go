@@ -278,6 +278,142 @@ type (
 		CAuthenticatorDetails  uint32
 		PpAuthenticatorDetails **_WEBAUTHN_AUTHENTICATOR_DETAILS
 	}
+
+	_WEBAUTHN_PLUGIN_ADD_AUTHENTICATOR_OPTIONS struct {
+		PwszAuthenticatorName *uint16
+		Rclsid                *_GUID
+		PwszPluginRpId        *uint16
+		PwszLightThemeLogoSvg *uint16
+		PwszDarkThemeLogoSvg  *uint16
+		CbAuthenticatorInfo   uint32
+		PbAuthenticatorInfo   *uint8
+		CSupportedRpIds       uint32
+		PpwszSupportedRpIds   **uint16
+	}
+	_WEBAUTHN_PLUGIN_ADD_AUTHENTICATOR_RESPONSE struct {
+		CbOpSignPubKey uint32
+		PbOpSignPubKey *uint8
+	}
+	_WEBAUTHN_PLUGIN_UPDATE_AUTHENTICATOR_DETAILS struct {
+		PwszAuthenticatorName *uint16
+		Rclsid                *_GUID
+		RclsidNew             *_GUID
+		PwszLightThemeLogoSvg *uint16
+		PwszDarkThemeLogoSvg  *uint16
+		CbAuthenticatorInfo   uint32
+		PbAuthenticatorInfo   *uint8
+		CSupportedRpIds       uint32
+		PpwszSupportedRpIds   **uint16
+	}
+	_WEBAUTHN_PLUGIN_CREDENTIAL_DETAILS struct {
+		CbCredentialId      uint32
+		PbCredentialId      *uint8
+		PwszRpId            *uint16
+		PwszRpName          *uint16
+		CbUserId            uint32
+		PbUserId            *uint8
+		PwszUserName        *uint16
+		PwszUserDisplayName *uint16
+	}
+	_WEBAUTHN_PLUGIN_USER_VERIFICATION_REQUEST struct {
+		Hwnd               uintptr
+		RguidTransactionId *_GUID
+		PwszUsername       *uint16
+		PwszDisplayHint    *uint16
+	}
+	_WEBAUTHN_CTAPCBOR_AUTHENTICATOR_OPTIONS struct {
+		DwVersion           uint32
+		LUp                 int32
+		LUv                 int32
+		LRequireResidentKey int32
+	}
+	_WEBAUTHN_CTAPCBOR_ECC_PUBLIC_KEY struct {
+		DwVersion uint32
+		LKty      int32
+		LAlg      int32
+		LCrv      int32
+		CbX       uint32
+		PbX       *uint8
+		CbY       uint32
+		PbY       *uint8
+	}
+	_WEBAUTHN_CTAPCBOR_HMAC_SALT_EXTENSION struct {
+		DwVersion       uint32
+		PKeyAgreement   *_WEBAUTHN_CTAPCBOR_ECC_PUBLIC_KEY
+		CbEncryptedSalt uint32
+		PbEncryptedSalt *uint8
+		CbSaltAuth      uint32
+		PbSaltAuth      *uint8
+	}
+	_WEBAUTHN_CTAPCBOR_MAKE_CREDENTIAL_REQUEST struct {
+		DwVersion                    uint32
+		CbRpId                       uint32
+		PbRpId                       *uint8
+		CbClientDataHash             uint32
+		PbClientDataHash             *uint8
+		PRpInformation               *_WEBAUTHN_RP_ENTITY_INFORMATION
+		PUserInformation             *_WEBAUTHN_USER_ENTITY_INFORMATION
+		WebAuthNCredentialParameters _WEBAUTHN_COSE_CREDENTIAL_PARAMETERS
+		CredentialList               _WEBAUTHN_CREDENTIAL_LIST
+		CbCborExtensionsMap          uint32
+		PbCborExtensionsMap          *uint8
+		PAuthenticatorOptions        *_WEBAUTHN_CTAPCBOR_AUTHENTICATOR_OPTIONS
+		FEmptyPinAuth                int32
+		CbPinAuth                    uint32
+		PbPinAuth                    *uint8
+		LHmacSecretExt               int32
+		PHmacSecretMcExtension       *_WEBAUTHN_CTAPCBOR_HMAC_SALT_EXTENSION
+		LPrfExt                      int32
+		CbHmacSecretSaltValues       uint32
+		PbHmacSecretSaltValues       *uint8
+		DwCredProtect                uint32
+		DwPinProtocol                uint32
+		DwEnterpriseAttestation      uint32
+		CbCredBlobExt                uint32
+		PbCredBlobExt                *uint8
+		LLargeBlobKeyExt             int32
+		DwLargeBlobSupport           uint32
+		LMinPinLengthExt             int32
+		CbJsonExt                    uint32
+		PbJsonExt                    *uint8
+	}
+	_WEBAUTHN_CTAPCBOR_GET_ASSERTION_REQUEST struct {
+		DwVersion                   uint32
+		PwszRpId                    *uint16
+		CbRpId                      uint32
+		PbRpId                      *uint8
+		CbClientDataHash            uint32
+		PbClientDataHash            *uint8
+		CredentialList              _WEBAUTHN_CREDENTIAL_LIST
+		CbCborExtensionsMap         uint32
+		PbCborExtensionsMap         *uint8
+		PAuthenticatorOptions       *_WEBAUTHN_CTAPCBOR_AUTHENTICATOR_OPTIONS
+		FEmptyPinAuth               int32
+		CbPinAuth                   uint32
+		PbPinAuth                   *uint8
+		PHmacSaltExtension          *_WEBAUTHN_CTAPCBOR_HMAC_SALT_EXTENSION
+		CbHmacSecretSaltValues      uint32
+		PbHmacSecretSaltValues      *uint8
+		DwPinProtocol               uint32
+		LCredBlobExt                int32
+		LLargeBlobKeyExt            int32
+		DwCredLargeBlobOperation    uint32
+		CbCredLargeBlobCompressed   uint32
+		PbCredLargeBlobCompressed   *uint8
+		DwCredLargeBlobOriginalSize uint32
+		CbJsonExt                   uint32
+		PbJsonExt                   *uint8
+	}
+	_WEBAUTHN_CTAPCBOR_GET_ASSERTION_RESPONSE struct {
+		WebAuthNAssertion          _WEBAUTHN_ASSERTION
+		PUserInformation           *_WEBAUTHN_USER_ENTITY_INFORMATION
+		DwNumberOfCredentials      uint32
+		LUserSelected              int32
+		CbLargeBlobKey             uint32
+		PbLargeBlobKey             *uint8
+		CbUnsignedExtensionOutputs uint32
+		PbUnsignedExtensionOutputs *uint8
+	}
 )
 
 func int32ToBool(i int32) bool {

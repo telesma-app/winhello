@@ -1,6 +1,6 @@
 //go:build windows
 
-//go:generate powershell -Command "go tool cgo -godefs types_webauthn.go | Set-Content -Path ztypes_webauthn.go -Encoding UTF8"
+//go:generate powershell ./generate.ps1
 package winhello
 
 import (
@@ -311,6 +311,7 @@ func MakeCredential(
 			PbId:            unsafe.SliceData(user.ID),
 			PwszName:        windows.StringToUTF16Ptr(user.Name),
 			PwszDisplayName: windows.StringToUTF16Ptr(user.DisplayName),
+			PwszIcon:        windows.StringToUTF16Ptr(user.Icon),
 		})),
 		uintptr(unsafe.Pointer(&_WEBAUTHN_COSE_CREDENTIAL_PARAMETERS{
 			CCredentialParameters: uint32(len(coseCredentialParams)),
@@ -648,6 +649,7 @@ func PlatformCredentialList(rpID string, browserInPrivateMode bool) ([]*WebAuthn
 				ID:          bytes.Clone(unsafe.Slice(cred.PUserInformation.PbId, cred.PUserInformation.CbId)),
 				DisplayName: windows.UTF16PtrToString(cred.PUserInformation.PwszDisplayName),
 				Name:        windows.UTF16PtrToString(cred.PUserInformation.PwszName),
+				Icon:        windows.UTF16PtrToString(cred.PUserInformation.PwszIcon),
 			},
 			Removable: int32ToBool(cred.BRemovable),
 		}

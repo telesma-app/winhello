@@ -4,6 +4,7 @@ go 1.27.3
 
 require (
 	github.com/fxamacker/cbor/v2 v2.10.0
+	github.com/go-ole/go-ole v1.3.0
 	github.com/goforj/godump v1.10.0
 	github.com/stretchr/testify v1.12.1
 	github.com/telesma-app/ctap v0.53.1

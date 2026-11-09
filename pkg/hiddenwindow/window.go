@@ -91,7 +91,7 @@ func createIconFromResourceEx(
 
 	ret, _, err := procCreateIconFromResourceEx.Call(
 		uintptr(unsafe.Pointer(&iconBytes[0])),
-		uintptr(uint32(len(iconBytes))),
+		uintptr(len(iconBytes)),
 		uintptr(bIcon),
 		uintptr(dwVer),
 		uintptr(cxDesired),
