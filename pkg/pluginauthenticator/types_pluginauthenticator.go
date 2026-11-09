@@ -1,6 +1,6 @@
 //go:build ignore
 
-package main
+package pluginauthenticator
 
 /*
 //#cgo CFLAGS: -I${SRCDIR}

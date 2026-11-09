@@ -68,6 +68,46 @@ Both steps require user interaction. The example deletes its demo passkey when i
 It uses placeholder client data for a local API demonstration; a real application
 must supply its own client data and validate the registration and assertion responses.
 
+### WinHello Passkey Demo
+
+The [WinHello Passkey Demo example](cmd/gopassmanager) uses
+[`pluginauthenticator.Serve`](pkg/pluginauthenticator) and stores one ES256
+passkey per Windows user. It requires Windows 11 24H2 build 26100.6725 or
+later, Windows Hello, and the Windows SDK's `mt.exe` on `PATH`. The staging
+script embeds a manifest that suppresses the console on COM activation.
+
+For a local browser test, enable [Developer Mode](https://learn.microsoft.com/windows/advanced-settings/developer-mode).
+Run from the repository root. Use `arm64` on Windows on Arm.
+
+```powershell
+$layout = Join-Path $env:LOCALAPPDATA 'WinHelloPluginPackage'
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\cmd\gopassmanager\stage-plugin.ps1 -Architecture amd64 -Destination $layout
+if ($LASTEXITCODE -ne 0) { throw 'Could not stage WinHello Passkey Demo' }
+Add-AppxPackage -Register (Join-Path $layout 'AppxManifest.xml') -ErrorAction Stop
+$provider = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\winhello-plugin.exe'
+& $provider register
+```
+
+1. Enable **WinHello Passkey Demo** in **Settings > Accounts > Passkeys > Advanced options**.
+2. In [WebAuthn.io](https://webauthn.io/?regUserVerification=required&attestation=none&discoverableCredential=required&regPubKeyAlgs=es256&authUserVerification=required),
+   register a test username. Choose **WinHello Passkey Demo** and confirm Windows Hello.
+3. Stop the provider, then authenticate with the same username in the same tab.
+   Select the saved passkey in the Windows picker. Windows starts a new provider process.
+
+   ```powershell
+   Get-Process plugin | Where-Object Path -eq (Join-Path $layout 'plugin.exe') | Stop-Process
+   ```
+
+For a clean rerun, unregister the provider and remove the demo credential
+at `%LOCALAPPDATA%\WinHelloDemo\credential.dat`.
+
+For sparse MSIX, pass `-Sparse` to the staging script. Pack the resulting
+`Identity` directory with `MakeAppx.exe pack /nv`, sign the package with a
+trusted `CN=GoPass` certificate, and install it with
+`Add-AppxPackage -Path <msix> -ExternalLocation <staged App directory>`.
+Run `App\plugin.exe register`. Uninstall the loose package before switching
+layouts. [Microsoft sparse MSIX guide](https://learn.microsoft.com/windows/apps/desktop/modernize/grant-identity-to-nonpackaged-apps)
+
 ## API coverage
 
 - [x] WebAuthNAuthenticatorGetAssertion

@@ -3,12 +3,15 @@
 package winhello
 
 import (
+	"crypto/sha256"
 	"encoding/hex"
 	"os"
 	"testing"
 	"uuid"
 
+	"github.com/fxamacker/cbor/v2"
 	"github.com/stretchr/testify/assert"
+	"github.com/telesma-app/ctap/attestation"
 	"github.com/telesma-app/ctap/cose"
 	"github.com/telesma-app/ctap/credential"
 	"github.com/telesma-app/ctap/extension"
@@ -19,6 +22,7 @@ var clsid = "{1537ff70-8f94-495b-bad1-bcff96311d5f}"
 
 func requirePluginTest(t *testing.T) {
 	t.Helper()
+
 	if enabled := os.Getenv("WINHELLO_PLUGIN_TESTS"); enabled != "1" && enabled != "true" {
 		t.Skip("WINHELLO_PLUGIN_TESTS is not set")
 	}
@@ -27,42 +31,19 @@ func requirePluginTest(t *testing.T) {
 func TestAddAuthenticator(t *testing.T) {
 	requirePluginTest(t)
 
-	svg := `<?xml version="1.0" encoding="utf-8"?>
-	<svg width="800px" height="800px" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-	<path fill-rule="evenodd" clip-rule="evenodd" d="M8 16L3.54223 12.3383C1.93278 11.0162 1 9.04287 1 6.96005C1 3.11612 4.15607 0 8 0C11.8439 0 15 3.11612 15 6.96005C15 9.04287 14.0672 11.0162 12.4578 12.3383L8 16ZM3 6H5C6.10457 6 7 6.89543 7 8V9L3 7.5V6ZM11 6C9.89543 6 9 6.89543 9 8V9L13 7.5V6H11Z" fill="#000000"/>
-	</svg>`
-	_ = svg
-
-	//refClsid, err := windows.GUIDFromString(clsid)
-	//require.NoError(t, err)
-
-	/*callbackHandle := windows.NewCallback(registerStatusChangeCallback)
-	var myContext uintptr = 12345
-	var registerHandle windows.Handle
-
-	r1, _, _ := procWebAuthNPluginRegisterStatusChangeCallback.Call(
-		callbackHandle,
-		myContext,
-		uintptr(unsafe.Pointer(&refClsid)),
-		uintptr(unsafe.Pointer(&registerHandle)),
-	)
-	if hr := windows.Handle(r1); hr != windows.S_OK {
-		t.Fatal(hr)
-	}*/
-
 	state, err := PluginGetAuthenticatorState(clsid)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if state != PluginAuthenticatorStateEnabled {
 		t.Fatal("Authenticator is not enabled")
 	}
 
 	_, err = PluginAddAuthenticator(&PluginAddAuthenticatorOptions{
-		AuthenticatorName: "GoPass Manager",
+		AuthenticatorName: "WinHello Passkey Demo",
 		CLSID:             clsid,
 		PluginRPID:        "id.krasovs.ky",
-		//LightThemeLogoSvg: svg,
 		//DarkThemeLogoSvg:  svg,
 		AuthenticatorInfo: &protocol.AuthenticatorGetInfoResponse{
 			Versions:           protocol.Versions{"FIDO_2_1", "FIDO_2_0"},
@@ -94,7 +75,7 @@ func TestPluginAuthenticatorCredentials(t *testing.T) {
 		{
 			CredentialID:    []byte("1234567890"),
 			RPID:            "id.krasovs.ky",
-			RPName:          "GoPass Manager",
+			RPName:          "WinHello Passkey Demo",
 			UserID:          []byte("savely"),
 			UserName:        "savely",
 			UserDisplayName: "Savely",
@@ -106,6 +87,7 @@ func TestPluginAuthenticatorCredentials(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	assert.NotEmpty(t, credentials)
 
 	assert.Equal(t, "1234567890", string(credentials[0].CredentialID))
@@ -119,7 +101,7 @@ func TestPluginAuthenticatorCredentials(t *testing.T) {
 		{
 			CredentialID:    []byte("1234567890"),
 			RPID:            "id.krasovs.ky",
-			RPName:          "GoPass Manager",
+			RPName:          "WinHello Passkey Demo",
 			UserID:          []byte("savely"),
 			UserName:        "savely",
 			UserDisplayName: "Savely",
@@ -131,6 +113,7 @@ func TestPluginAuthenticatorCredentials(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	assert.NotEmpty(t, credentials)
 
 	assert.Equal(t, "1234567890", string(credentials[0].CredentialID))
@@ -160,6 +143,7 @@ func TestPluginGetUserVerificationCount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	assert.Greater(t, count, uint32(0))
 }
 
@@ -170,6 +154,7 @@ func TestPluginGetUserVerificationPublicKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	assert.NotEmpty(t, pubKey)
 }
 
@@ -180,6 +165,7 @@ func TestPluginGetOperationSigningPublicKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	assert.NotEmpty(t, pubKey)
 }
 
@@ -193,12 +179,62 @@ func TestPluginEncodeMakeCredentialResponse(t *testing.T) {
 
 	encodedResponse, err := PluginEncodeMakeCredentialResponse(&WinHelloMakeCredentialResponse{
 		AuthenticatorMakeCredentialResponse: &protocol.AuthenticatorMakeCredentialResponse{
-			AuthDataRaw: b,
+			Format:               attestation.AttestationStatementFormatIdentifierNone,
+			AuthDataRaw:          b,
+			AttestationStatement: map[string]any{},
 		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	assert.NotEmpty(t, encodedResponse)
+	var response protocol.AuthenticatorMakeCredentialResponse
+	if err := cbor.Unmarshal(encodedResponse, &response); err != nil {
+		t.Fatal(err)
+	}
+
+	assert.Equal(t, attestation.AttestationStatementFormatIdentifierNone, response.Format)
+	assert.Equal(t, b, response.AuthDataRaw)
+	assert.Equal(t, map[string]any{}, response.AttestationStatement)
+}
+
+func TestPluginEncodeGetAssertionResponse(t *testing.T) {
+	requirePluginTest(t)
+
+	rpIDHash := sha256.Sum256([]byte("example.com"))
+	authData := append(rpIDHash[:], 0x05, 0, 0, 0, 0)
+	signature := []byte{0x30, 0x06, 0x02, 0x01, 0x01, 0x02, 0x01, 0x01}
+	descriptor := credential.PublicKeyCredentialDescriptor{
+		Type: credential.PublicKeyCredentialTypePublicKey,
+		ID:   []byte("test credential"),
+	}
+	user := &credential.PublicKeyCredentialUserEntity{ID: []byte("test user")}
+
+	encodedResponse, err := PluginEncodeGetAssertionResponse(&CTAPCBORGetAssertionResponse{
+		WinHelloGetAssertionResponse: &WinHelloGetAssertionResponse{
+			AuthenticatorGetAssertionResponse: &protocol.AuthenticatorGetAssertionResponse{
+				Credential:  descriptor,
+				AuthDataRaw: authData,
+				Signature:   signature,
+				User:        user,
+			},
+		},
+		UserInformation:     user,
+		NumberOfCredentials: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var response protocol.AuthenticatorGetAssertionResponse
+	if err := cbor.Unmarshal(encodedResponse, &response); err != nil {
+		t.Fatal(err)
+	}
+
+	assert.Equal(t, descriptor, response.Credential)
+	assert.Equal(t, authData, response.AuthDataRaw)
+	assert.Equal(t, signature, response.Signature)
+	assert.Equal(t, user, response.User)
+	// The count may be omitted for a single credential.
+	assert.LessOrEqual(t, response.NumberOfCredentials, uint(1))
 }

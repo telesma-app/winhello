@@ -212,7 +212,7 @@ func (r *_WEBAUTHN_CTAPCBOR_GET_ASSERTION_REQUEST) ToGetAssertionRequest() (*CTA
 
 		if r.PHmacSaltExtension.PKeyAgreement != nil {
 			// It seems Windows doesn't support the Octet Key Pair key type.
-			req.Extensions.GetHMACSecretInput.HMACSecret.KeyAgreement = cose.Key{
+			req.Extensions.HMACSecret.KeyAgreement = cose.Key{
 				cose.KeyParameterKty:    r.PHmacSaltExtension.PKeyAgreement.LKty,
 				cose.KeyParameterAlg:    r.PHmacSaltExtension.PKeyAgreement.LAlg,
 				cose.EC2KeyParameterCrv: r.PHmacSaltExtension.PKeyAgreement.LCrv,

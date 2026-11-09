@@ -39,8 +39,6 @@ var (
 	procWebAuthNDecodeGetAssertionRequest                     = modWebAuthn.NewProc("WebAuthNDecodeGetAssertionRequest")
 	procWebAuthNFreeDecodedGetAssertionRequest                = modWebAuthn.NewProc("WebAuthNFreeDecodedGetAssertionRequest")
 	procWebAuthNEncodeGetAssertionResponse                    = modWebAuthn.NewProc("WebAuthNEncodeGetAssertionResponse")
-	procWebAuthNPluginRegisterStatusChangeCallback            = modWebAuthn.NewProc("WebAuthNPluginRegisterStatusChangeCallback")
-	procWebAuthNPluginUnregisterStatusChangeCallback          = modWebAuthn.NewProc("WebAuthNPluginUnregisterStatusChangeCallback")
 )
 
 type PluginAuthenticatorState int32
@@ -61,6 +59,7 @@ func PluginGetAuthenticatorState(clsid string) (PluginAuthenticatorState, error)
 	}
 
 	var state PluginAuthenticatorState
+
 	r1, _, _ := procWebAuthNPluginGetAuthenticatorState.Call(
 		uintptr(unsafe.Pointer(&rclsid)),
 		uintptr(unsafe.Pointer(&state)),
@@ -75,7 +74,7 @@ func PluginGetAuthenticatorState(clsid string) (PluginAuthenticatorState, error)
 type PluginAddAuthenticatorOptions struct {
 	AuthenticatorName string // required
 	CLSID             string // required
-	PluginRPID        string // required, MSDN is wrong
+	PluginRPID        string
 	LightThemeLogoSvg string
 	DarkThemeLogoSvg  string
 	AuthenticatorInfo *protocol.AuthenticatorGetInfoResponse
@@ -102,12 +101,14 @@ func PluginAddAuthenticator(winHelloOpts *PluginAddAuthenticatorOptions) ([]byte
 			return nil, err
 		}
 	}
+
 	if winHelloOpts.LightThemeLogoSvg != "" {
 		opts.PwszLightThemeLogoSvg, err = windows.UTF16PtrFromString(winHelloOpts.LightThemeLogoSvg)
 		if err != nil {
 			return nil, err
 		}
 	}
+
 	if winHelloOpts.DarkThemeLogoSvg != "" {
 		opts.PwszDarkThemeLogoSvg, err = windows.UTF16PtrFromString(winHelloOpts.DarkThemeLogoSvg)
 		if err != nil {
@@ -119,9 +120,11 @@ func PluginAddAuthenticator(winHelloOpts *PluginAddAuthenticatorOptions) ([]byte
 	if err != nil {
 		return nil, err
 	}
+
 	opts.Rclsid = (*_GUID)(&clsid)
 
 	encMode, _ := cbor.CTAP2EncOptions().EncMode()
+
 	authenticatorInfo, err := encMode.Marshal(winHelloOpts.AuthenticatorInfo)
 	if err != nil {
 		return nil, err
@@ -130,7 +133,7 @@ func PluginAddAuthenticator(winHelloOpts *PluginAddAuthenticatorOptions) ([]byte
 	opts.CbAuthenticatorInfo = uint32(len(authenticatorInfo))
 	opts.PbAuthenticatorInfo = unsafe.SliceData(authenticatorInfo)
 
-	if winHelloOpts.SupportedRPIDs != nil && len(winHelloOpts.SupportedRPIDs) > 0 {
+	if len(winHelloOpts.SupportedRPIDs) > 0 {
 		supportedRPIDs := make([]*uint16, len(winHelloOpts.SupportedRPIDs))
 		for i, rp := range winHelloOpts.SupportedRPIDs {
 			supportedRPIDs[i] = windows.StringToUTF16Ptr(rp)
@@ -141,6 +144,7 @@ func PluginAddAuthenticator(winHelloOpts *PluginAddAuthenticatorOptions) ([]byte
 	}
 
 	var addAuthenticatorResponsePtr *_WEBAUTHN_PLUGIN_ADD_AUTHENTICATOR_RESPONSE
+
 	r1, _, _ := procWebAuthNPluginAddAuthenticator.Call(
 		uintptr(unsafe.Pointer(opts)),
 		uintptr(unsafe.Pointer(&addAuthenticatorResponsePtr)),
@@ -209,6 +213,7 @@ func PluginUpdateAuthenticatorDetails(winHelloOpts *PluginUpdateAuthenticatorDet
 			return err
 		}
 	}
+
 	if winHelloOpts.DarkThemeLogoSvg != "" {
 		opts.PwszDarkThemeLogoSvg, err = windows.UTF16PtrFromString(winHelloOpts.DarkThemeLogoSvg)
 		if err != nil {
@@ -220,16 +225,20 @@ func PluginUpdateAuthenticatorDetails(winHelloOpts *PluginUpdateAuthenticatorDet
 	if err != nil {
 		return err
 	}
+
 	opts.Rclsid = (*_GUID)(&clsid)
+
 	if winHelloOpts.NewCLSID != "" {
 		newCLSID, err := windows.GUIDFromString(winHelloOpts.NewCLSID)
 		if err != nil {
 			return err
 		}
+
 		opts.RclsidNew = (*_GUID)(&newCLSID)
 	}
 
 	encMode, _ := cbor.CTAP2EncOptions().EncMode()
+
 	authenticatorInfo, err := encMode.Marshal(winHelloOpts.AuthenticatorInfo)
 	if err != nil {
 		return err
@@ -238,7 +247,7 @@ func PluginUpdateAuthenticatorDetails(winHelloOpts *PluginUpdateAuthenticatorDet
 	opts.CbAuthenticatorInfo = uint32(len(authenticatorInfo))
 	opts.PbAuthenticatorInfo = unsafe.SliceData(authenticatorInfo)
 
-	if winHelloOpts.SupportedRPIDs != nil && len(winHelloOpts.SupportedRPIDs) > 0 {
+	if len(winHelloOpts.SupportedRPIDs) > 0 {
 		supportedRPIDs := make([]*uint16, len(winHelloOpts.SupportedRPIDs))
 		for i, rp := range winHelloOpts.SupportedRPIDs {
 			supportedRPIDs[i] = windows.StringToUTF16Ptr(rp)
@@ -277,24 +286,15 @@ func PluginAuthenticatorAddCredentials(clsid string, credentials []*PluginCreden
 		return err
 	}
 
-	pCredDetails := make([]*_WEBAUTHN_PLUGIN_CREDENTIAL_DETAILS, len(credentials))
-	for i, cred := range credentials {
-		pCredDetails[i] = &_WEBAUTHN_PLUGIN_CREDENTIAL_DETAILS{
-			CbCredentialId:      uint32(len(cred.CredentialID)),
-			PbCredentialId:      unsafe.SliceData(cred.CredentialID),
-			PwszRpId:            windows.StringToUTF16Ptr(cred.RPID),
-			PwszRpName:          windows.StringToUTF16Ptr(cred.RPName),
-			CbUserId:            uint32(len(cred.UserID)),
-			PbUserId:            unsafe.SliceData(cred.UserID),
-			PwszUserName:        windows.StringToUTF16Ptr(cred.UserName),
-			PwszUserDisplayName: windows.StringToUTF16Ptr(cred.UserDisplayName),
-		}
+	pCredDetails, err := pluginCredentialDetails(credentials)
+	if err != nil {
+		return err
 	}
 
 	r1, _, _ := procWebAuthNPluginAuthenticatorAddCredentials.Call(
 		uintptr(unsafe.Pointer(&rclsid)),
 		uintptr(len(pCredDetails)),
-		uintptr(unsafe.Pointer(pCredDetails[0])),
+		uintptr(unsafe.Pointer(unsafe.SliceData(pCredDetails))),
 	)
 	if hr := windows.Handle(r1); hr != windows.S_OK {
 		return windows.Errno(hr)
@@ -313,30 +313,59 @@ func PluginAuthenticatorRemoveCredentials(clsid string, credentials []*PluginCre
 		return err
 	}
 
-	pCredDetails := make([]*_WEBAUTHN_PLUGIN_CREDENTIAL_DETAILS, len(credentials))
-	for i, cred := range credentials {
-		pCredDetails[i] = &_WEBAUTHN_PLUGIN_CREDENTIAL_DETAILS{
-			CbCredentialId:      uint32(len(cred.CredentialID)),
-			PbCredentialId:      unsafe.SliceData(cred.CredentialID),
-			PwszRpId:            windows.StringToUTF16Ptr(cred.RPID),
-			PwszRpName:          windows.StringToUTF16Ptr(cred.RPName),
-			CbUserId:            uint32(len(cred.UserID)),
-			PbUserId:            unsafe.SliceData(cred.UserID),
-			PwszUserName:        windows.StringToUTF16Ptr(cred.UserName),
-			PwszUserDisplayName: windows.StringToUTF16Ptr(cred.UserDisplayName),
-		}
+	pCredDetails, err := pluginCredentialDetails(credentials)
+	if err != nil {
+		return err
 	}
 
 	r1, _, _ := procWebAuthNPluginAuthenticatorRemoveCredentials.Call(
 		uintptr(unsafe.Pointer(&rclsid)),
 		uintptr(len(pCredDetails)),
-		uintptr(unsafe.Pointer(pCredDetails[0])),
+		uintptr(unsafe.Pointer(unsafe.SliceData(pCredDetails))),
 	)
 	if hr := windows.Handle(r1); hr != windows.S_OK {
 		return windows.Errno(hr)
 	}
 
 	return nil
+}
+
+func pluginCredentialDetails(credentials []*PluginCredentialDetail) ([]_WEBAUTHN_PLUGIN_CREDENTIAL_DETAILS, error) {
+	details := make([]_WEBAUTHN_PLUGIN_CREDENTIAL_DETAILS, len(credentials))
+	for i, cred := range credentials {
+		rpID, err := windows.UTF16PtrFromString(cred.RPID)
+		if err != nil {
+			return nil, err
+		}
+
+		rpName, err := windows.UTF16PtrFromString(cred.RPName)
+		if err != nil {
+			return nil, err
+		}
+
+		userName, err := windows.UTF16PtrFromString(cred.UserName)
+		if err != nil {
+			return nil, err
+		}
+
+		displayName, err := windows.UTF16PtrFromString(cred.UserDisplayName)
+		if err != nil {
+			return nil, err
+		}
+
+		details[i] = _WEBAUTHN_PLUGIN_CREDENTIAL_DETAILS{
+			CbCredentialId:      uint32(len(cred.CredentialID)),
+			PbCredentialId:      unsafe.SliceData(cred.CredentialID),
+			PwszRpId:            rpID,
+			PwszRpName:          rpName,
+			CbUserId:            uint32(len(cred.UserID)),
+			PbUserId:            unsafe.SliceData(cred.UserID),
+			PwszUserName:        userName,
+			PwszUserDisplayName: displayName,
+		}
+	}
+
+	return details, nil
 }
 
 func PluginAuthenticatorRemoveAllCredentials(clsid string) error {
@@ -373,6 +402,7 @@ func PluginAuthenticatorGetAllCredentials(clsid string) ([]*PluginCredentialDeta
 		cCredDetails uint32
 		pCredDetails *_WEBAUTHN_PLUGIN_CREDENTIAL_DETAILS
 	)
+
 	r1, _, _ := procWebAuthNPluginAuthenticatorGetAllCredentials.Call(
 		uintptr(unsafe.Pointer(&rclsid)),
 		uintptr(unsafe.Pointer(&cCredDetails)),
@@ -383,6 +413,7 @@ func PluginAuthenticatorGetAllCredentials(clsid string) ([]*PluginCredentialDeta
 	}
 
 	rawCredDetails := unsafe.Slice(pCredDetails, cCredDetails)
+
 	credDetails := make([]*PluginCredentialDetail, cCredDetails)
 	for i, rawCredDetail := range rawCredDetails {
 		credDetails[i] = &PluginCredentialDetail{
@@ -395,10 +426,10 @@ func PluginAuthenticatorGetAllCredentials(clsid string) ([]*PluginCredentialDeta
 		}
 	}
 
-	procWebAuthNPluginAuthenticatorFreeCredentialDetailsArray.Call(
+	_, _, _ = procWebAuthNPluginAuthenticatorFreeCredentialDetailsArray.Call(
 		uintptr(cCredDetails),
 		uintptr(unsafe.Pointer(pCredDetails)),
-	) //nolint:errcheck // Native function returns void.
+	)
 
 	return credDetails, nil
 }
@@ -431,6 +462,7 @@ func PluginPerformUserVerification(winHelloOpts *PluginUserVerificationRequestOp
 		cbResponse uint32
 		pbResponse *byte
 	)
+
 	r1, _, _ := procWebAuthNPluginPerformUserVerification.Call(
 		uintptr(unsafe.Pointer(userVerificationRequest)),
 		uintptr(unsafe.Pointer(&cbResponse)),
@@ -456,6 +488,7 @@ func PluginGetUserVerificationCount(clsid string) (uint32, error) {
 	}
 
 	var count uint32
+
 	r1, _, _ := procWebAuthNPluginGetUserVerificationCount.Call(
 		uintptr(unsafe.Pointer(&rclsid)),
 		uintptr(unsafe.Pointer(&count)),
@@ -481,6 +514,7 @@ func PluginGetUserVerificationPublicKey(clsid string) (crypto.PublicKey, error) 
 		cbPublicKey uint32
 		pPublicKey  *byte
 	)
+
 	r1, _, _ := procWebAuthNPluginGetUserVerificationPublicKey.Call(
 		uintptr(unsafe.Pointer(&rclsid)),
 		uintptr(unsafe.Pointer(&cbPublicKey)),
@@ -492,11 +526,11 @@ func PluginGetUserVerificationPublicKey(clsid string) (crypto.PublicKey, error) 
 
 	pubKeyBytes := bytes.Clone(unsafe.Slice(pPublicKey, cbPublicKey))
 
-	procWebAuthNPluginFreePublicKeyResponse.Call(
+	_, _, _ = procWebAuthNPluginFreePublicKeyResponse.Call(
 		uintptr(unsafe.Pointer(pPublicKey)),
-	) //nolint:errcheck // Native function returns void.
+	)
 
-	pubKey, err := utils.PublicKeyFromCNGECBlob(pubKeyBytes)
+	pubKey, err := utils.PublicKeyFromCNGBlob(pubKeyBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -518,6 +552,7 @@ func PluginGetOperationSigningPublicKey(clsid string) (crypto.PublicKey, error) 
 		cbPublicKey uint32
 		pPublicKey  *byte
 	)
+
 	r1, _, _ := procWebAuthNPluginGetOperationSigningPublicKey.Call(
 		uintptr(unsafe.Pointer(&rclsid)),
 		uintptr(unsafe.Pointer(&cbPublicKey)),
@@ -529,11 +564,11 @@ func PluginGetOperationSigningPublicKey(clsid string) (crypto.PublicKey, error) 
 
 	pubKeyBytes := bytes.Clone(unsafe.Slice(pPublicKey, cbPublicKey))
 
-	procWebAuthNPluginFreePublicKeyResponse.Call(
+	_, _, _ = procWebAuthNPluginFreePublicKeyResponse.Call(
 		uintptr(unsafe.Pointer(pPublicKey)),
-	) //nolint:errcheck // Native function returns void.
+	)
 
-	pubKey, err := utils.PublicKeyFromCNGECBlob(pubKeyBytes)
+	pubKey, err := utils.PublicKeyFromCNGBlob(pubKeyBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -553,12 +588,17 @@ func PluginEncodeMakeCredentialResponse(decodedResponse *WinHelloMakeCredentialR
 		return nil, errors.New("invalid make credential response")
 	}
 
-	// Attestation format type
-	if decodedResponse.Format != "" {
-		pCredAttestation.PwszFormatType, _ = windows.UTF16PtrFromString(string(decodedResponse.Format))
-	} else {
-		pCredAttestation.PwszFormatType, _ = windows.UTF16PtrFromString(string(attestation.AttestationStatementFormatIdentifierNone))
+	format := decodedResponse.Format
+	if format == "" {
+		format = attestation.AttestationStatementFormatIdentifierNone
 	}
+
+	formatType, err := windows.UTF16PtrFromString(string(format))
+	if err != nil {
+		return nil, err
+	}
+
+	pCredAttestation.PwszFormatType = formatType
 
 	// Authenticator data
 	if decodedResponse.AuthDataRaw != nil {
@@ -567,14 +607,16 @@ func PluginEncodeMakeCredentialResponse(decodedResponse *WinHelloMakeCredentialR
 	}
 
 	// CBOR attestation information
-	if decodedResponse.AttestationStatement == nil {
+	if format == attestation.AttestationStatementFormatIdentifierNone || decodedResponse.AttestationStatement == nil {
 		pCredAttestation.DwAttestationDecodeType = uint32(WinHelloAttestationDecodeNone)
 	} else {
 		encMode, _ := cbor.CTAP2EncOptions().EncMode()
+
 		attStt, err := encMode.Marshal(decodedResponse.AttestationStatement)
 		if err != nil {
 			return nil, err
 		}
+
 		pCredAttestation.CbAttestation = uint32(len(attStt))
 		pCredAttestation.PbAttestation = unsafe.SliceData(attStt)
 		pCredAttestation.DwAttestationDecodeType = uint32(WinHelloAttestationDecodeCommon)
@@ -659,22 +701,21 @@ func PluginEncodeMakeCredentialResponse(decodedResponse *WinHelloMakeCredentialR
 
 	var (
 		cbResp uint32
-		pbRest *byte
+		pbResp *byte
 	)
 
 	r1, _, _ := procWebAuthNEncodeMakeCredentialResponse.Call(
 		uintptr(unsafe.Pointer(pCredAttestation)),
 		uintptr(unsafe.Pointer(&cbResp)),
-		uintptr(unsafe.Pointer(&pbRest)),
+		uintptr(unsafe.Pointer(&pbResp)),
 	)
 	if hr := windows.Handle(r1); hr != windows.S_OK {
 		return nil, windows.Errno(hr)
 	}
 
-	// For some reason there is no Free method for this byte buffer.
-	// I am not sure why, but it will probably leak.
+	defer windows.CoTaskMemFree(unsafe.Pointer(pbResp))
 
-	return bytes.Clone(unsafe.Slice(pbRest, cbResp)), nil
+	return bytes.Clone(unsafe.Slice(pbResp, cbResp)), nil
 }
 
 func PluginDecodeMakeCredentialRequest(encodedRequest []byte) (*MakeCredentialRequest, error) {
@@ -769,22 +810,39 @@ func PluginEncodeGetAssertionResponse(decodedResponse *CTAPCBORGetAssertionRespo
 
 	if decodedResponse.UnsignedExtensionOutputs != nil {
 		encMode, _ := cbor.CTAP2EncOptions().EncMode()
+
 		unsignedExtensionOutputs, err := encMode.Marshal(decodedResponse.UnsignedExtensionOutputs)
 		if err != nil {
 			return nil, err
 		}
+
 		pGetAssertionResponse.CbUnsignedExtensionOutputs = uint32(len(unsignedExtensionOutputs))
 		pGetAssertionResponse.PbUnsignedExtensionOutputs = unsafe.SliceData(unsignedExtensionOutputs)
 	}
 
-	if decodedResponse.UserInformation != nil {
+	if user := decodedResponse.UserInformation; user != nil {
+		name, err := windows.UTF16PtrFromString(user.Name)
+		if err != nil {
+			return nil, err
+		}
+
+		icon, err := windows.UTF16PtrFromString(user.Icon)
+		if err != nil {
+			return nil, err
+		}
+
+		displayName, err := windows.UTF16PtrFromString(user.DisplayName)
+		if err != nil {
+			return nil, err
+		}
+
 		pGetAssertionResponse.PUserInformation = &_WEBAUTHN_USER_ENTITY_INFORMATION{
 			DwVersion:       currVer.userEntityInformation,
-			CbId:            uint32(len(decodedResponse.UserInformation.ID)),
-			PbId:            unsafe.SliceData(decodedResponse.UserInformation.ID),
-			PwszName:        windows.StringToUTF16Ptr(decodedResponse.UserInformation.Name),
-			PwszIcon:        windows.StringToUTF16Ptr(decodedResponse.UserInformation.Icon),
-			PwszDisplayName: windows.StringToUTF16Ptr(decodedResponse.UserInformation.DisplayName),
+			CbId:            uint32(len(user.ID)),
+			PbId:            unsafe.SliceData(user.ID),
+			PwszName:        name,
+			PwszIcon:        icon,
+			PwszDisplayName: displayName,
 		}
 	}
 
@@ -816,8 +874,7 @@ func PluginEncodeGetAssertionResponse(decodedResponse *CTAPCBORGetAssertionRespo
 		return nil, windows.Errno(hr)
 	}
 
-	// For some reason there is no Free method for this byte buffer.
-	// I am not sure why, but it will probably leak.
+	defer windows.CoTaskMemFree(unsafe.Pointer(pbResp))
 
 	return bytes.Clone(unsafe.Slice(pbResp, cbResp)), nil
 }

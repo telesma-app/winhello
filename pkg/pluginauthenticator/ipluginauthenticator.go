@@ -1,33 +1,33 @@
 //go:build windows
 
-package main
+package pluginauthenticator
 
 import (
-	"bytes"
-	"log"
-	"sync/atomic"
-	"syscall"
+	"context"
+	"errors"
+	"fmt"
+	"sync"
 	"unsafe"
 
 	"github.com/go-ole/go-ole"
-	"github.com/goforj/godump"
 	"github.com/telesma-app/winhello"
+	"github.com/telesma-app/winhello/internal/utils"
 	"golang.org/x/sys/windows"
 )
 
-var (
-	IID_IClassFactory         = ole.NewGUID("{00000001-0000-0000-C000-000000000046}")
-	IID_IPluginAuthenticator  = ole.NewGUID("{d26bcf6f-b54c-43ff-9f06-d5bf148625f7}")
-	CLSID_PluginAuthenticator = ole.NewGUID("{1537ff70-8f94-495b-bad1-bcff96311d5f}")
-)
+type pluginAuthenticator struct {
+	vtable *pluginAuthenticatorVtbl
+	refs   comReferences
+	ctx    context.Context
+	clsid  string
 
-type PluginAuthenticator struct {
-	lpVtbl    *IPluginAuthenticatorVtbl
-	refCount  int32
-	callbacks *PluginCallbacks
+	// Shutdown waits for callbacks before releasing the handler.
+	mu      sync.Mutex
+	active  sync.WaitGroup
+	handler Handler
 }
 
-type IPluginAuthenticatorVtbl struct {
+type pluginAuthenticatorVtbl struct {
 	ole.IUnknownVtbl
 	MakeCredential  uintptr
 	GetAssertion    uintptr
@@ -35,188 +35,240 @@ type IPluginAuthenticatorVtbl struct {
 	GetLockStatus   uintptr
 }
 
-var pluginVtbl IPluginAuthenticatorVtbl
+var pluginVtbl pluginAuthenticatorVtbl
 
 func init() {
-	pluginVtbl = IPluginAuthenticatorVtbl{
+	pluginVtbl = pluginAuthenticatorVtbl{
 		IUnknownVtbl: ole.IUnknownVtbl{
-			QueryInterface: syscall.NewCallback(pluginQueryInterface),
-			AddRef:         syscall.NewCallback(pluginAddRef),
-			Release:        syscall.NewCallback(pluginRelease),
+			QueryInterface: windows.NewCallback(pluginQueryInterface),
+			AddRef:         windows.NewCallback(pluginAddRef),
+			Release:        windows.NewCallback(pluginRelease),
 		},
-		MakeCredential:  syscall.NewCallback(pluginMakeCredential),
-		GetAssertion:    syscall.NewCallback(pluginGetAssertion),
-		CancelOperation: syscall.NewCallback(pluginCancelOperation),
-		GetLockStatus:   syscall.NewCallback(pluginGetLockStatus),
+		MakeCredential:  windows.NewCallback(pluginMakeCredential),
+		GetAssertion:    windows.NewCallback(pluginGetAssertion),
+		CancelOperation: windows.NewCallback(pluginCancelOperation),
+		GetLockStatus:   windows.NewCallback(pluginGetLockStatus),
 	}
 }
 
-type PluginCallbacks struct {
-	OnMakeCredential  func(req *PluginOperationRequest) (*winhello.WinHelloMakeCredentialResponse, error)
-	OnGetAssertion    func(req *PluginOperationRequest) (*winhello.CTAPCBORGetAssertionResponse, error)
-	OnCancelOperation func(req *PluginCancelOperationRequest) error
-	OnGetLockStatus   func() (PluginLockStatus, error)
-}
-
-func NewPluginAuthenticator(callbacks *PluginCallbacks) *PluginAuthenticator {
-	p := &PluginAuthenticator{
-		lpVtbl:    &pluginVtbl,
-		refCount:  1,
-		callbacks: callbacks,
-	}
-	atomic.AddInt32(&g_objCount, 1)
-	return p
-}
-
-func pluginQueryInterface(this unsafe.Pointer, iid *ole.GUID, pUnk *unsafe.Pointer) windows.Handle {
-	if pUnk == nil {
+func pluginQueryInterface(this *pluginAuthenticator, iid *ole.GUID, object *unsafe.Pointer) windows.Handle {
+	if object == nil {
 		return windows.E_POINTER
 	}
-	*pUnk = nil
 
-	if ole.IsEqualGUID(iid, ole.IID_IUnknown) ||
-		ole.IsEqualGUID(iid, IID_IPluginAuthenticator) {
-		pluginAddRef(this)
-		*pUnk = this
-		return windows.S_OK
+	*object = nil
+
+	if !ole.IsEqualGUID(iid, ole.IID_IUnknown) && !ole.IsEqualGUID(iid, pluginIID) {
+		return windows.E_NOINTERFACE
 	}
 
-	return windows.E_NOINTERFACE
+	pluginAddRef(this)
+	*object = unsafe.Pointer(this)
+
+	return windows.S_OK
 }
 
-func pluginAddRef(this unsafe.Pointer) uintptr {
-	pThis := (*PluginAuthenticator)(this)
-	newCount := atomic.AddInt32(&pThis.refCount, 1)
-	return uintptr(newCount)
+func pluginAddRef(this *pluginAuthenticator) uintptr {
+	return this.refs.add()
 }
 
-func pluginRelease(this unsafe.Pointer) uintptr {
-	pThis := (*PluginAuthenticator)(this)
-	newCount := atomic.AddInt32(&pThis.refCount, -1)
-	if newCount == 0 {
-		atomic.AddInt32(&g_objCount, -1)
-	}
-	return uintptr(newCount)
+func pluginRelease(this *pluginAuthenticator) uintptr {
+	return this.refs.release(unsafe.Pointer(this))
 }
 
 func pluginMakeCredential(
-	this unsafe.Pointer,
+	this *pluginAuthenticator,
 	opReq *_WEBAUTHN_PLUGIN_OPERATION_REQUEST,
 	opResp *_WEBAUTHN_PLUGIN_OPERATION_RESPONSE,
 ) windows.Handle {
-	pThis := (*PluginAuthenticator)(this)
-
-	// Hopefully, the request will be valid until the response is sent;
-	// otherwise it's better to clone bytes into Go memory.
-	encodedRequest := bytes.Clone(unsafe.Slice(opReq.PbEncodedRequest, opReq.CbEncodedRequest))
-
-	req, err := winhello.PluginDecodeMakeCredentialRequest(encodedRequest)
-	if err != nil {
-		log.Println(err)
-		return windows.E_FAIL
+	if opReq == nil || opResp == nil {
+		return windows.E_POINTER
 	}
 
-	godump.Dump(req)
+	*opResp = _WEBAUTHN_PLUGIN_OPERATION_RESPONSE{}
 
-	resp, err := pThis.callbacks.OnMakeCredential(&PluginOperationRequest{
-		WindowHandle:                 opReq.HWnd,
-		TransactionID:                opReq.TransactionId,
-		RequestSignature:             bytes.Clone(unsafe.Slice(opReq.PbRequestSignature, opReq.CbRequestSignature)),
-		RequestType:                  PluginRequestType(opReq.RequestType),
-		EncodedRequest:               encodedRequest,
-		DecodedMakeCredentialRequest: req,
-	})
+	return operationResult(this.makeCredential(opReq, opResp))
+}
+
+func (p *pluginAuthenticator) makeCredential(
+	opReq *_WEBAUTHN_PLUGIN_OPERATION_REQUEST,
+	opResp *_WEBAUTHN_PLUGIN_OPERATION_RESPONSE,
+) (err error) {
+	handler, err := p.beginOperation()
 	if err != nil {
-		log.Println(err)
-		return windows.E_FAIL
+		return err
+	}
+	defer p.active.Done()
+
+	op, err := p.verifiedOperation(opReq)
+	if err != nil {
+		return err
 	}
 
-	encodedResponse, err := winhello.PluginEncodeMakeCredentialResponse(resp)
+	req, err := winhello.PluginDecodeMakeCredentialRequest(op.encoded)
 	if err != nil {
-		log.Println(err)
-		return windows.E_FAIL
+		return fmt.Errorf("decode make credential request: %w", err)
 	}
 
-	return writeOperationResponse(opResp, encodedResponse)
+	result, err := handler.MakeCredential(p.ctx, op, req)
+	if err != nil {
+		return err
+	}
+
+	defer func() {
+		if err != nil && result.Rollback != nil {
+			err = errors.Join(err, result.Rollback())
+		}
+	}()
+
+	payload, err := winhello.PluginEncodeMakeCredentialResponse(result.Response)
+	if err != nil {
+		return fmt.Errorf("encode attestation: %w", err)
+	}
+
+	return writeOperationResponse(opResp, payload)
 }
 
 func pluginGetAssertion(
-	this unsafe.Pointer,
+	this *pluginAuthenticator,
 	opReq *_WEBAUTHN_PLUGIN_OPERATION_REQUEST,
 	opResp *_WEBAUTHN_PLUGIN_OPERATION_RESPONSE,
 ) windows.Handle {
-	pThis := (*PluginAuthenticator)(this)
-
-	encodedRequest := bytes.Clone(unsafe.Slice(opReq.PbEncodedRequest, opReq.CbEncodedRequest))
-
-	req, err := winhello.PluginDecodeGetAssertionRequest(unsafe.Slice(opReq.PbEncodedRequest, opReq.CbEncodedRequest))
-	if err != nil {
-		log.Println(err)
-		return windows.E_FAIL
+	if opReq == nil || opResp == nil {
+		return windows.E_POINTER
 	}
 
-	godump.Dump(req)
+	*opResp = _WEBAUTHN_PLUGIN_OPERATION_RESPONSE{}
 
-	resp, err := pThis.callbacks.OnGetAssertion(&PluginOperationRequest{
-		WindowHandle:               opReq.HWnd,
-		TransactionID:              opReq.TransactionId,
-		RequestSignature:           bytes.Clone(unsafe.Slice(opReq.PbRequestSignature, opReq.CbRequestSignature)),
-		RequestType:                PluginRequestType(opReq.RequestType),
-		EncodedRequest:             encodedRequest,
-		DecodedGetAssertionRequest: req,
-	})
-	if err != nil {
-		log.Println(err)
-		return windows.E_FAIL
-	}
-
-	encodedResponse, err := winhello.PluginEncodeGetAssertionResponse(resp)
-	if err != nil {
-		log.Println(err)
-		return windows.E_FAIL
-	}
-
-	return writeOperationResponse(opResp, encodedResponse)
+	return operationResult(this.getAssertion(opReq, opResp))
 }
 
-func pluginCancelOperation(this unsafe.Pointer, opReq *_WEBAUTHN_PLUGIN_CANCEL_OPERATION_REQUEST) windows.Handle {
-	pThis := (*PluginAuthenticator)(this)
+func (p *pluginAuthenticator) getAssertion(
+	opReq *_WEBAUTHN_PLUGIN_OPERATION_REQUEST,
+	opResp *_WEBAUTHN_PLUGIN_OPERATION_RESPONSE,
+) error {
+	handler, err := p.beginOperation()
+	if err != nil {
+		return err
+	}
+	defer p.active.Done()
 
-	if err := pThis.callbacks.OnCancelOperation(&PluginCancelOperationRequest{
-		TransactionID:    opReq.TransactionId,
-		RequestSignature: bytes.Clone(unsafe.Slice(opReq.PbRequestSignature, opReq.CbRequestSignature)),
-	}); err != nil {
-		return windows.E_FAIL
+	op, err := p.verifiedOperation(opReq)
+	if err != nil {
+		return err
+	}
+
+	req, err := winhello.PluginDecodeGetAssertionRequest(op.encoded)
+	if err != nil {
+		return fmt.Errorf("decode get assertion request: %w", err)
+	}
+
+	resp, err := handler.GetAssertion(p.ctx, op, req)
+	if err != nil {
+		return err
+	}
+
+	payload, err := winhello.PluginEncodeGetAssertionResponse(resp)
+	if err != nil {
+		return fmt.Errorf("encode assertion: %w", err)
+	}
+
+	return writeOperationResponse(opResp, payload)
+}
+
+func (p *pluginAuthenticator) beginOperation() (Handler, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.ctx.Err() != nil {
+		return nil, windows.Errno(windows.CO_E_OBJNOTCONNECTED)
+	}
+
+	p.active.Add(1)
+
+	return p.handler, nil
+}
+
+func (p *pluginAuthenticator) verifiedOperation(req *_WEBAUTHN_PLUGIN_OPERATION_REQUEST) (*Operation, error) {
+	if req.RequestType != pluginRequestCTAP2CBOR || req.PbEncodedRequest == nil || req.CbEncodedRequest == 0 ||
+		req.PbRequestSignature == nil || req.CbRequestSignature == 0 {
+		return nil, windows.Errno(windows.E_INVALIDARG)
+	}
+
+	// COM owns the request buffers until the callback returns.
+	encoded := unsafe.Slice(req.PbEncodedRequest, req.CbEncodedRequest)
+	signature := unsafe.Slice(req.PbRequestSignature, req.CbRequestSignature)
+
+	key, err := winhello.PluginGetOperationSigningPublicKey(p.clsid)
+	if err != nil {
+		return nil, fmt.Errorf("read operation signing key: %w", err)
+	}
+
+	if err := utils.VerifyCNGSignature(key, encoded, signature); err != nil {
+		return nil, fmt.Errorf("verify operation signature: %w: %w", windows.Errno(windows.E_ACCESSDENIED), err)
+	}
+
+	return &Operation{
+		clsid:       p.clsid,
+		window:      req.HWnd,
+		transaction: req.TransactionId,
+		encoded:     encoded,
+	}, nil
+}
+
+func pluginCancelOperation(_ *pluginAuthenticator, _ *_WEBAUTHN_PLUGIN_CANCEL_OPERATION_REQUEST) windows.Handle {
+	return windows.E_NOTIMPL
+}
+
+func pluginGetLockStatus(this *pluginAuthenticator, status *uint32) windows.Handle {
+	if status == nil {
+		return windows.E_POINTER
+	}
+
+	handler, err := this.beginOperation()
+	if err != nil {
+		return operationResult(err)
+	}
+	defer this.active.Done()
+
+	*status = pluginUnlocked
+	if handler.Locked() {
+		*status = pluginLocked
 	}
 
 	return windows.S_OK
 }
 
-func pluginGetLockStatus(this unsafe.Pointer, respLockStatus *PluginLockStatus) windows.Handle {
-	pThis := (*PluginAuthenticator)(this)
-
-	lockStatus, err := pThis.callbacks.OnGetLockStatus()
-	if err != nil {
-		return windows.E_FAIL
+func operationResult(err error) windows.Handle {
+	if err == nil {
+		return windows.S_OK
 	}
 
-	*respLockStatus = lockStatus
-	return windows.S_OK
+	if errors.Is(err, context.Canceled) || errors.Is(err, windows.ERROR_CANCELLED) {
+		return windows.NTE_USER_CANCELLED
+	}
+
+	var hr windows.Errno
+	if errors.As(err, &hr) && uint32(hr)&0x80000000 != 0 {
+		return windows.Handle(hr)
+	}
+
+	return windows.E_FAIL
 }
 
-func writeOperationResponse(opResp *_WEBAUTHN_PLUGIN_OPERATION_RESPONSE, encodedResponse []byte) windows.Handle {
-	addr, _, _ := procCoTaskMemAlloc.Call(uintptr(len(encodedResponse)))
+func writeOperationResponse(opResp *_WEBAUTHN_PLUGIN_OPERATION_RESPONSE, encoded []byte) error {
+	addr, _, _ := procCoTaskMemAlloc.Call(uintptr(len(encoded)))
 	if addr == 0 {
-		return windows.E_OUTOFMEMORY
+		return windows.Errno(windows.E_OUTOFMEMORY)
 	}
 
 	// CoTaskMemAlloc returns a native pointer in the syscall return register.
 	buf := *(**byte)(unsafe.Pointer(&addr))
-	copy(unsafe.Slice(buf, len(encodedResponse)), encodedResponse)
-
+	copy(unsafe.Slice(buf, len(encoded)), encoded)
 	*opResp = _WEBAUTHN_PLUGIN_OPERATION_RESPONSE{
-		CbEncodedResponse: uint32(len(encodedResponse)),
+		CbEncodedResponse: uint32(len(encoded)),
 		PbEncodedResponse: buf,
 	}
-	return windows.S_OK
+
+	return nil
 }
