@@ -8,7 +8,7 @@ require (
 	github.com/goforj/godump v1.10.0
 	github.com/stretchr/testify v1.12.1
 	github.com/telesma-app/ctap v0.53.1
-	golang.org/x/sys v0.49.0
+	golang.org/x/sys v0.50.0
 )
 
 require (
